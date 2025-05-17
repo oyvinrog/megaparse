@@ -66,6 +66,7 @@ class TableParserUI(QMainWindow):
         
         self.tables_list = QListWidget()
         self.tables_list.itemClicked.connect(self.on_table_selected)
+        self.tables_list.currentItemChanged.connect(self.on_table_selected)
         left_layout.addWidget(self.tables_list)
         
         # Table info section
@@ -166,6 +167,9 @@ class TableParserUI(QMainWindow):
     
     def on_table_selected(self, item):
         """Handle table selection"""
+        if not item:
+            return
+            
         table_id = item.data(Qt.ItemDataRole.UserRole)
         table_type = item.data(Qt.ItemDataRole.UserRole + 1)
         
