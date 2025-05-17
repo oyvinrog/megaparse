@@ -463,7 +463,11 @@ def get_tables(content):
     tables += find_dense_blocks(soup)
     tables += find_semantically_similar_blocks(soup)
     tables += find_data_patterns(soup)
-    return tables
+    
+    # Filter out tables with only one row or one column
+    filtered_tables = [df for df in tables if df.shape[0] > 1 and df.shape[1] > 1]
+    
+    return filtered_tables
 
 def test(url: str):
     """Fetch HTML from the URL and print summary of detected tables."""
