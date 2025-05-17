@@ -1,46 +1,65 @@
 import requests
-from bs4 import BeautifulSoup
 import pandas as pd
-import os
+import logging
 from urllib.parse import urlparse
+from bs4 import BeautifulSoup
+from parser import get_tables
 
 class TableParserModel:
     def __init__(self):
         self.url = ""
         self.tables = []
         self.table_dataframes = {}
+        self.html_content = ""
     
-    def load_url(self, url):
+    def load_url(self, url, extraction_config=None):
         """Load a URL and parse tables"""
         self.url = url
         self.tables = []
         self.table_dataframes = {}
         
         try:
-            response = requests.get(url)
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+            }
+            response = requests.get(url, headers=headers)
             response.raise_for_status()
             
-            soup = BeautifulSoup(response.text, 'lxml')
-            tables = soup.find_all('table')
+            self.html_content = response.text
             
-            for i, table in enumerate(tables):
-                # Create a descriptive name based on table headers or position
-                headers = table.find_all('th')
-                if headers:
-                    name = f"Table {i+1}: {' '.join([h.get_text().strip()[:10] for h in headers[:3]])}"
-                else:
-                    name = f"Table {i+1}"
-                
-                self.tables.append({"id": i, "name": name})
-                # Parse the table to DataFrame
-                df = pd.read_html(str(table))[0]
-                self.table_dataframes[i] = df
-                
+            # Use the parser.py functions to extract tables
+            self._parse_tables()
+            
             return True, f"Found {len(self.tables)} tables"
         except requests.exceptions.RequestException as e:
             return False, f"Error fetching URL: {str(e)}"
         except Exception as e:
             return False, f"Error parsing tables: {str(e)}"
+    
+    def _parse_tables(self):
+        """Parse tables using parser.py functions"""
+        try:
+            # Get all tables using the parser.py get_tables function
+            all_dfs = get_tables(self.html_content)
+            
+            for i, df in enumerate(all_dfs):
+                if not df.empty:
+                    table_id = len(self.tables)
+                    
+                    # Create a descriptive name based on table columns or position
+                    if len(df.columns) > 0:
+                        column_preview = " ".join([str(col)[:10] for col in df.columns[:3]])
+                        name = f"Table {table_id+1}: {column_preview}"
+                    else:
+                        name = f"Table {table_id+1}"
+                    
+                    # Determine type based on shape and structure
+                    table_type = "standard"
+                    
+                    self.tables.append({"id": table_id, "name": name, "type": table_type})
+                    self.table_dataframes[table_id] = df
+        except Exception as e:
+            logging.error(f"Error parsing tables: {str(e)}")
     
     def get_tables(self):
         """Return list of available tables"""
@@ -52,19 +71,29 @@ class TableParserModel:
             return self.table_dataframes[table_id].head(max_rows)
         return None
     
-    def save_table(self, table_id, filename=None):
-        """Save table to parquet file"""
+    def save_table(self, table_id, filename=None, format="parquet"):
+        """Save table to file in specified format"""
         if table_id not in self.table_dataframes:
             return False, "Table not found"
         
         if filename is None:
             # Create filename from URL and table ID
             domain = urlparse(self.url).netloc.replace(".", "_")
-            filename = f"{domain}_table_{table_id}.parquet"
+            extension = ".parquet" if format == "parquet" else ".csv" if format == "csv" else ".xlsx"
+            filename = f"{domain}_table_{table_id}{extension}"
         
         try:
             df = self.table_dataframes[table_id]
-            df.to_parquet(filename)
+            
+            if format == "parquet":
+                df.to_parquet(filename)
+            elif format == "csv":
+                df.to_csv(filename, index=False)
+            elif format == "excel":
+                df.to_excel(filename, index=False)
+            else:
+                return False, f"Unsupported format: {format}"
+                
             return True, f"Table saved to {filename}"
         except Exception as e:
             return False, f"Error saving table: {str(e)}" 
