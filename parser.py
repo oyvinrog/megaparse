@@ -1,12 +1,14 @@
 import requests
 from bs4 import BeautifulSoup
+from bs4.element import Comment, Doctype, ProcessingInstruction
 import pandas as pd
 from collections import Counter, defaultdict
 import sys
 import tty
 import termios
 import os
-
+import hashlib
+import re
 # Add color constants
 GREEN = '\033[92m'
 BOLD = '\033[1m'
@@ -45,6 +47,33 @@ def extract_html_tables(soup):
         except ValueError:
             continue
     return dfs
+
+def find_dense_blocks(soup, min_text_elements=5):
+    """
+    Detects standalone blocks (e.g., real estate cards) that have dense structured content,
+    even if they are not siblings or do not share classes.
+    """
+    blocks = []
+    for tag in soup.find_all("div"):
+        strings = [s.strip() for s in tag.stripped_strings if s.strip()]
+        if len(strings) >= min_text_elements:
+            blocks.append(strings)
+
+    # Group similar-length blocks to guess they belong together
+    grouped = {}
+    for row in blocks:
+        key = len(row)
+        grouped.setdefault(key, []).append(row)
+
+    dfs = []
+    for rows in grouped.values():
+        if len(rows) >= 3:
+            max_len = max(len(r) for r in rows)
+            normalized = [r + [''] * (max_len - len(r)) for r in rows]
+            df = pd.DataFrame(normalized)
+            dfs.append(df)
+    return dfs
+
 
 def find_repeated_structures(soup, min_repeats=3):
     """Find groups of sibling elements with repeated tag signatures."""
@@ -91,6 +120,53 @@ def find_visual_blocks(soup, min_repeats=3, min_text_elements=3):
 
     return blocks
 
+
+def structure_hash(tag, max_depth=3):
+    """
+    Generate a hashable structure signature of the element's tag tree.
+    """
+    def recurse(el, depth):
+        if depth == 0 or not el or not hasattr(el, 'children'):
+            return []
+        return [el.name] + [recurse(c, depth - 1) for c in el.find_all(recursive=False)]
+    
+    def flatten(tree):
+        if isinstance(tree, list):
+            return [i for subtree in tree for i in flatten(subtree)]
+        else:
+            return [tree]
+    
+    tree = recurse(tag, max_depth)
+    flat = flatten(tree)
+    return hashlib.md5(">".join(flat).encode()).hexdigest()
+
+def find_semantically_similar_blocks(soup, min_group_size=3, min_text_items=3):
+    """
+    Detect groups of <div> elements that share similar internal tag structures and
+    contain enough textual content to be treated as records.
+    """
+    block_map = {}
+    
+    for div in soup.find_all("div"):
+        strings = [s.strip() for s in div.stripped_strings if s.strip()]
+        if len(strings) < min_text_items:
+            continue
+
+        sig = structure_hash(div)
+        if sig not in block_map:
+            block_map[sig] = []
+        block_map[sig].append(strings)
+
+    tables = []
+    for group in block_map.values():
+        if len(group) >= min_group_size:
+            max_len = max(len(row) for row in group)
+            normalized = [r + [''] * (max_len - len(r)) for r in group]
+            df = pd.DataFrame(normalized)
+            tables.append(df)
+    return tables
+
+
 def find_repeated_class_blocks(soup, min_repeats=3, min_text_elements=3):
     """
     Find repeated class-based elements that look like content cards (e.g., real estate listings).
@@ -122,16 +198,270 @@ def find_repeated_class_blocks(soup, min_repeats=3, min_text_elements=3):
 
     return blocks
 
+def find_data_patterns(soup, min_matches=3):
+    """
+    A generic function to identify and extract data patterns from any webpage.
+    This approach doesn't rely on specific tags or classes, but instead looks for 
+    patterns in the data itself, like prices, measurements, dates, etc.
+    
+    Parameters:
+    -----------
+    soup : BeautifulSoup
+        The parsed HTML content
+    min_matches : int
+        Minimum occurrences needed to consider a pattern
+        
+    Returns:
+    --------
+    list of DataFrames
+        Each DataFrame contains a different type of structured data
+    """
+    all_text = soup.get_text()
+    
+    # Define pattern detectors with their regexes
+    pattern_detectors = {
+        'prices': [
+            # Price patterns with currency
+            r'(\d[\d\s]*[.,]?\d*)\s*(?:kr|€|£|\$|USD|EUR|NOK|SEK|DKK)',  # General price with currency
+            r'(?:kr|€|£|\$|USD|EUR|NOK|SEK|DKK)\s*(\d[\d\s]*[.,]?\d*)',  # Currency first then amount
+            
+            # Price with context
+            r'(?:pris|price|cost|total)(?:\w*)\s*(?:\:|\-|\.|\s)\s*(\d[\d\s]*[.,]?\d*)',  # Price labels
+            r'(?:Prisantydning|Totalpris|Fellesutgifter|Fellesutg\.|Omkostninger|Omkost\.)\s*(?:\:|\-|\.|\s)?\s*(\d[\d\s]*[.,]?\d*)',  # Norwegian price labels
+            
+            # Price ranges
+            r'(\d[\d\s]*[.,]?\d*)\s*(?:-|–|to|til)\s*(\d[\d\s]*[.,]?\d*)\s*(?:kr|€|£|\$|USD|EUR|NOK|SEK|DKK)',  # Price ranges
+            
+            # Numbers that look like prices (large numbers with proper formatting)
+            r'(?<!\w)(\d{1,3}(?:\s*\d{3})+)(?!\w)',  # Large numbers with space separators
+            r'(?<!\w)(\d{1,3}(?:,\d{3})+)(?!\w)',     # Large numbers with comma separators
+            r'(?<!\w)(\d{1,3}(?:\.\d{3})+)(?:,\d+)?(?!\w)',  # European style numbers
+        ],
+        'areas': [
+            r'(\d+[\d\s]*[.,]?\d*)\s*(?:m²|kvm|m2|sq\.ft|sqft)',  # Area measurements
+            r'(\d+[\d\s]*[.,]?\d*)\s*(?:kvadratmeter|square\s+meters?)',  # Written out area
+            r'(?:areal|area|størrelse|size)\s*(?:\:|\-|\.|\s)?\s*(\d+[\d\s]*[.,]?\d*)\s*(?:m²|kvm|m2)',  # Area with label
+        ],
+        'dates': [
+            r'\d{1,2}\.\d{1,2}\.\d{2,4}',  # European date format
+            r'\d{1,2}/\d{1,2}/\d{2,4}',    # US date format
+            r'\d{4}-\d{1,2}-\d{1,2}',      # ISO date format
+            r'(?:mandag|tirsdag|onsdag|torsdag|fredag|lørdag|søndag)\s+\d{1,2}\.\s+\w+',  # Norwegian weekday format
+        ],
+        'phone_numbers': [
+            r'(?:\+\d{1,3}\s?)?\(?\d{3}\)?[\s.-]?\d{3}[\s.-]?\d{4}',  # Generic phone number format
+            r'(?:\+\d{1,3}\s?)?\d{8}',  # Norway phone number format (8 digits)
+        ],
+        'postal_codes': [
+            r'\b\d{4,5}\b\s+\w+',  # Postal code + city name
+            r'\b\w+\s+\d{4,5}\b',  # City name + postal code
+        ]
+    }
+    
+    results = {}
+    
+    # Extract text elements
+    text_elements = []
+    for el in soup.find_all(text=True):
+        text = el.strip()
+        if text and not isinstance(el, (Comment, Doctype, ProcessingInstruction)):
+            # Find parent element to provide context
+            parent = el.parent
+            text_elements.append((text, parent.name))
+    
+    # Look for patterns in text elements
+    for pattern_type, regexes in pattern_detectors.items():
+        matches = []
+        
+        for text, parent_tag in text_elements:
+            for regex in regexes:
+                found = re.findall(regex, text)
+                for match in found:
+                    # Skip if match is just a single digit
+                    if isinstance(match, str) and match.strip().isdigit() and len(match.strip()) <= 1:
+                        continue
+                    
+                    # Clean up the match
+                    if isinstance(match, tuple):
+                        # If it's a tuple, it means we captured multiple groups
+                        # For price ranges, create a formatted string
+                        if pattern_type == 'prices' and len(match) == 2:
+                            match = f"{match[0]} - {match[1]}"  # Price range
+                        else:
+                            match = match[0]  # Take first capture group
+                    
+                    # Extract surrounding context to help identify what the data means
+                    if isinstance(match, str):
+                        text_pos = text.find(match)
+                        if text_pos >= 0:
+                            # Get text before the match (for context)
+                            before_text = text[:text_pos].strip()
+                            # Get text after the match (sometimes contains units or other info)
+                            after_text = text[text_pos + len(match):].strip()
+                            
+                            # Keep at most 5 words of context before and 3 words after
+                            before_words = before_text.split()[-5:]
+                            after_words = after_text.split()[:3]
+                            context = ' '.join(before_words + ["|"] + after_words)
+                        else:
+                            context = ""
+                    else:
+                        context = ""
+                    
+                    matches.append({
+                        'value': str(match).strip(),
+                        'context': context,
+                        'parent_tag': parent_tag
+                    })
+        
+        # Remove duplicates
+        unique_matches = []
+        seen_values = set()
+        for match in matches:
+            if match['value'] not in seen_values:
+                unique_matches.append(match)
+                seen_values.add(match['value'])
+        
+        if len(unique_matches) >= min_matches:
+            results[pattern_type] = unique_matches
+    
+    # Convert results to DataFrames
+    dfs = []
+    for pattern_type, matches in results.items():
+        df = pd.DataFrame(matches)
+        df.attrs['pattern_type'] = pattern_type
+        dfs.append(df)
+    
+    # Try to find structured data like key-value pairs
+    # This works in both definition lists and various labeling patterns
+    key_value_pairs = find_key_value_structure(soup)
+    if key_value_pairs and len(key_value_pairs) >= 2:  # At least 2 pairs to be useful
+        df = pd.DataFrame(key_value_pairs)
+        df.attrs['pattern_type'] = 'key_value_pairs'
+        dfs.append(df)
+    
+    return dfs
+
+def find_key_value_structure(soup):
+    """
+    Looks for key-value pairs in the document regardless of the specific HTML structure.
+    Works for various ways of representing data like definition lists, tables, or labeled content.
+    """
+    pairs = []
+    
+    # Process definition lists
+    for dl in soup.find_all('dl'):
+        dts = dl.find_all('dt')
+        dds = dl.find_all('dd')
+        
+        # Match dt elements with their corresponding dd elements
+        for i, dt in enumerate(dts):
+            if i < len(dds):
+                key = dt.get_text(strip=True)
+                value = dds[i].get_text(strip=True)
+                if key and value:
+                    pairs.append({'key': key, 'value': value})
+    
+    # Process tables that might contain key-value data
+    for table in soup.find_all('table'):
+        for row in table.find_all('tr'):
+            cells = row.find_all(['th', 'td'])
+            if len(cells) >= 2:
+                key = cells[0].get_text(strip=True)
+                value = cells[1].get_text(strip=True)
+                if key and value:
+                    pairs.append({'key': key, 'value': value})
+    
+    # Look for labeled content with strong, span, etc.
+    for selector in ["strong", "b", "span", "label", "dt", "th"]:
+        for tag in soup.find_all(selector):
+            text = tag.get_text(strip=True)
+            if not text or len(text) > 50:  # Skip if empty or too long
+                continue
+            
+            # Check for tags that have a label-like format
+            if text.endswith(':') or text.endswith('='):
+                next_sib = tag.find_next_sibling()
+                if next_sib:
+                    value = next_sib.get_text(strip=True)
+                    if value and not value.endswith(':') and not value.endswith('='):
+                        pairs.append({'key': text.rstrip(':='), 'value': value})
+                # Also try to find the value in the next text node
+                elif tag.next_sibling and isinstance(tag.next_sibling, str):
+                    value = tag.next_sibling.strip()
+                    if value:
+                        pairs.append({'key': text.rstrip(':='), 'value': value})
+                # Try to find the value in the parent's next sibling
+                elif tag.parent and tag.parent.next_sibling:
+                    next_parent_sib = tag.parent.next_sibling
+                    if isinstance(next_parent_sib, str):
+                        value = next_parent_sib.strip()
+                    else:
+                        value = next_parent_sib.get_text(strip=True) if hasattr(next_parent_sib, 'get_text') else ""
+                    
+                    if value and not value.endswith(':') and not value.endswith('='):
+                        pairs.append({'key': text.rstrip(':='), 'value': value})
+    
+    # Look for divs that might contain key-value pairs
+    for div in soup.find_all('div'):
+        # Check if it has exactly two children, one might be a key and one might be a value
+        children = list(div.children)
+        filtered_children = [c for c in children if not (isinstance(c, str) and c.strip() == '')]
+        if len(filtered_children) == 2:
+            first_text = filtered_children[0].get_text(strip=True) if hasattr(filtered_children[0], 'get_text') else str(filtered_children[0]).strip()
+            second_text = filtered_children[1].get_text(strip=True) if hasattr(filtered_children[1], 'get_text') else str(filtered_children[1]).strip()
+            
+            if first_text and second_text:
+                # Heuristics to identify if the first child is a key
+                if len(first_text) < 50 and first_text.endswith(':'):
+                    pairs.append({'key': first_text.rstrip(':'), 'value': second_text})
+                # Or if the second looks like a value (numbers, units, etc.)
+                elif re.search(r'\d', second_text) or re.search(r'(kr|m²|kvm|sqft|\$|€)', second_text):
+                    pairs.append({'key': first_text, 'value': second_text})
+    
+    # Find common labeling patterns in any element
+    for p in soup.find_all(['p', 'div', 'li', 'span']):
+        text = p.get_text(strip=True)
+        
+        # Skip very short or very long texts
+        if len(text) <= 3 or len(text) > 200:
+            continue
+            
+        # Look for patterns like "Key: Value" or "Key - Value"
+        for pattern in [r'^([^:]+):\s*(.*?)(?:\s*\||$)', r'^([^-]+)\s*-\s*(.*?)(?:\s*\||$)']: 
+            match = re.match(pattern, text)
+            if match:
+                key, value = match.groups()
+                key = key.strip()
+                value = value.strip()
+                if key and value and len(key) < 50:  # Avoid capturing entire paragraphs
+                    pairs.append({'key': key, 'value': value})
+    
+    # Clean up duplicates
+    unique_pairs = []
+    seen = set()
+    for pair in pairs:
+        pair_id = (pair['key'], pair['value'])
+        if pair_id not in seen:
+            unique_pairs.append(pair)
+            seen.add(pair_id)
+    
+    return unique_pairs
+
 def get_tables(content):
     """
     Parses arbitrary HTML and returns a list of pandas.DataFrame,
     including real <table>s, repeated-tag pseudo-tables, visual blocks, and repeated class blocks.
     """
     soup = BeautifulSoup(content, "lxml")
+    
     tables = extract_html_tables(soup)
     tables += find_repeated_structures(soup)
     tables += find_visual_blocks(soup)
     tables += find_repeated_class_blocks(soup)
+    tables += find_dense_blocks(soup)
+    tables += find_semantically_similar_blocks(soup)
+    tables += find_data_patterns(soup)
     return tables
 
 def test(url: str):

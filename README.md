@@ -1,46 +1,98 @@
-# Web Table Parser
+# MegaParse - Generic HTML Structure Extractor
 
-A PyQt6 application for parsing HTML tables from web pages and saving them as Parquet files.
-
-## Design goals
-
-The parser in `parser.py`should be the best parser available for extracting relational tables from HTML
+MegaParse is a powerful, generic HTML data extraction tool that can identify and extract structured data from any HTML page without requiring site-specific scraping rules.
 
 ## Features
 
-- Load any webpage and extract tables
-- View a list of available tables
-- Preview table content before downloading
-- Save selected tables as Parquet files
-
-## Requirements
-
-- Python 3.8+
-- Dependencies listed in `requirements.txt`
+- **Generic extraction**: Works on any website without site-specific rules
+- **Pattern recognition**: Identifies common data patterns like prices, dates, areas, and more
+- **Structural analysis**: Detects repeated patterns and table-like structures
+- **Key-value identification**: Extracts property-value pairs regardless of HTML structure
+- **CSV export**: Saves all extracted data in organized CSV files
 
 ## Installation
 
-1. Clone this repository
-2. Install dependencies:
-
 ```bash
+# Clone the repository
+git clone https://github.com/yourusername/megaparse.git
+cd megaparse
+
+# Install dependencies
 pip install -r requirements.txt
 ```
 
 ## Usage
 
-1. Run the application:
+### Command-line Interface
 
 ```bash
-python main.py
+./megaparse_demo.py [URL or HTML file] [options]
 ```
 
-2. Enter a URL in the input field and click "Fetch Tables"
-3. Select a table from the list to preview its contents
-4. Click "Save Selected Table" to save the table as a Parquet file
+**Arguments:**
+- `source`: URL or local HTML file to parse
 
-## Structure
+**Options:**
+- `--output`, `-o`: Output directory for CSV files (default: 'output')
+- `--min-rows`, `-m`: Minimum rows to save a table (default: 3)
+- `--verbose`, `-v`: Show detailed output
 
-- `main.py` - Main application entry point
-- `table_parser_model.py` - Model for web table parsing and data handling
-- `table_parser_ui.py` - PyQt6 user interface components 
+### Examples
+
+```bash
+# Parse a website
+./megaparse_demo.py https://www.example.com/
+
+# Parse a local HTML file
+./megaparse_demo.py local_file.html
+
+# Save output to a custom directory
+./megaparse_demo.py https://www.example.com/ --output my_data
+
+# Show detailed information during extraction
+./megaparse_demo.py https://www.example.com/ --verbose
+```
+
+### Using the Library in Your Code
+
+```python
+from parser import get_tables
+import requests
+
+# Fetch HTML content
+response = requests.get('https://www.example.com/')
+content = response.text
+
+# Extract structured data
+tables = get_tables(content)
+
+# Process the tables
+for i, df in enumerate(tables, 1):
+    print(f"Table #{i}: shape={df.shape}")
+    if 'pattern_type' in df.attrs:
+        print(f"Type: {df.attrs['pattern_type']}")
+    print(df.head())
+```
+
+## How It Works
+
+MegaParse uses several different approaches to extract structured data:
+
+1. **HTML Tables**: Extracts data from standard HTML tables
+2. **Pattern Detection**: Identifies common data patterns like prices, dates, areas, etc.
+3. **Repeated Structures**: Finds groups of sibling elements with similar structure
+4. **Visual Blocks**: Detects repeated elements with similar content density
+5. **Class-based Blocks**: Identifies elements with the same CSS classes that contain structured data
+6. **Semantic Analysis**: Groups elements with similar internal structure
+7. **Key-Value Extraction**: Identifies content in various formats that represent property-value pairs
+
+## Requirements
+
+- Python 3.6+
+- beautifulsoup4
+- pandas
+- requests
+
+## License
+
+MIT 
