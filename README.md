@@ -2,6 +2,10 @@
 
 A PyQt6 application for parsing HTML tables from web pages and saving them as Parquet files.
 
+## Design goals
+
+The parser in `parser.py`should be the best parser available for extracting relational tables from HTML
+
 ## Features
 
 - Load any webpage and extract tables
