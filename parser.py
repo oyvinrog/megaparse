@@ -1,22 +1,36 @@
 import requests
 from bs4 import BeautifulSoup
 import pandas as pd
-from collections import Counter
+from collections import Counter, defaultdict
 import sys
 import tty
 import termios
+import os
 
 # Add color constants
 GREEN = '\033[92m'
 BOLD = '\033[1m'
 END = '\033[0m'
 
+# File to store the previously entered URL
+URL_HISTORY_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".url_history")
+
+# Load the previously entered URL
+previous_url = None
+try:
+    if os.path.exists(URL_HISTORY_FILE):
+        with open(URL_HISTORY_FILE, 'r') as f:
+            previous_url = f.read().strip()
+except Exception:
+    # If there's any error reading the file, just continue without a previous URL
+    pass
+
 def getch():
     """Get a single character from the user without requiring Enter."""
     fd = sys.stdin.fileno()
     old_settings = termios.tcgetattr(fd)
     try:
-        tty.setraw(sys.stdin.fileno())
+        tty.setraw(fd)
         ch = sys.stdin.read(1)
     finally:
         termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
@@ -33,10 +47,7 @@ def extract_html_tables(soup):
     return dfs
 
 def find_repeated_structures(soup, min_repeats=3):
-    """
-    Find groups of sibling elements whose direct children share the same set of
-    tags (a simple signature), and turn those into DataFrames.
-    """
+    """Find groups of sibling elements with repeated tag signatures."""
     tables = []
     for parent in soup.find_all():
         sigs = [tuple(child.name for child in child_el.find_all(recursive=False))
@@ -55,9 +66,7 @@ def find_repeated_structures(soup, min_repeats=3):
     return tables
 
 def find_visual_blocks(soup, min_repeats=3, min_text_elements=3):
-    """
-    Detect repeated visual blocks (e.g. cards) among sibling nodes with similar content density.
-    """
+    """Detect repeated sibling visual blocks with similar content density."""
     blocks = []
     for parent in soup.find_all():
         children = parent.find_all(recursive=False)
@@ -66,7 +75,7 @@ def find_visual_blocks(soup, min_repeats=3, min_text_elements=3):
 
         tag_name = children[0].name
         if not all(c.name == tag_name for c in children):
-            continue  # all siblings should be of the same tag type
+            continue
 
         candidate_rows = []
         for child in children:
@@ -82,15 +91,47 @@ def find_visual_blocks(soup, min_repeats=3, min_text_elements=3):
 
     return blocks
 
+def find_repeated_class_blocks(soup, min_repeats=3, min_text_elements=3):
+    """
+    Find repeated class-based elements that look like content cards (e.g., real estate listings).
+    """
+    class_map = defaultdict(list)
+    for tag in soup.find_all(True):
+        class_attr = tag.get("class")
+        if class_attr:
+            class_name = " ".join(class_attr)
+            class_map[class_name].append(tag)
+
+    blocks = []
+    for class_name, tags in class_map.items():
+        if len(tags) < min_repeats:
+            continue
+
+        rows = []
+        for tag in tags:
+            strings = [s.strip() for s in tag.stripped_strings if s.strip()]
+            if len(strings) >= min_text_elements:
+                rows.append(strings)
+
+        if len(rows) >= min_repeats:
+            max_len = max(len(row) for row in rows)
+            normalized_rows = [r + [''] * (max_len - len(r)) for r in rows]
+            df = pd.DataFrame(normalized_rows)
+            df.attrs['source_class'] = class_name  # Optional metadata
+            blocks.append(df)
+
+    return blocks
+
 def get_tables(content):
     """
     Parses arbitrary HTML and returns a list of pandas.DataFrame,
-    including real <table>s, repeated-tag pseudo-tables, and visual blocks.
+    including real <table>s, repeated-tag pseudo-tables, visual blocks, and repeated class blocks.
     """
     soup = BeautifulSoup(content, "lxml")
     tables = extract_html_tables(soup)
     tables += find_repeated_structures(soup)
     tables += find_visual_blocks(soup)
+    tables += find_repeated_class_blocks(soup)
     return tables
 
 def test(url: str):
@@ -105,13 +146,14 @@ def test(url: str):
     print(f"Found {len(tables)} tables/pseudo-tables.")
     for i, df in enumerate(tables, 1):
         print(f"\nTable #{i}: shape={df.shape}")
+        if 'source_class' in df.attrs:
+            print(f"(Detected from repeated class: '{df.attrs['source_class']}')")
         print(df.head())
 
 def sanity_checks():
     """Verify that the parser is working as expected."""
     url = "https://www.finn.no/realestate/homes/ad.html?finnkode=408006385"
 
-    # Should return at least 10 tables
     print(f"Fetching {url}...")
     response = requests.get(url)
     if response.status_code != 200:
@@ -123,12 +165,10 @@ def sanity_checks():
     assert len(tables) >= 10
     print("Sanity check passed for number of tables")
 
-    # Should return a DataFrame
     df = tables[0]
     assert isinstance(df, pd.DataFrame)
     print("Sanity check passed for DataFrame")
 
-    # One of the datafraames should have a column "dt" with a value "Boligtype" where column "dd" has a value "Leilighet"
     print("Checking for Boligtype value")
     for df in tables:
         if "dt" in df.columns and "dd" in df.columns:
@@ -138,8 +178,7 @@ def sanity_checks():
     else:
         raise ValueError("No table with the expected columns found")
     print("Sanity check passed for expected column values")
-    
-    # In the same way, look for Totalpris and see if it has a value of "4 104 417 kr" 
+
     expected_totalpris = "4 104 417 kr"
     print("Checking for Totalpris value")
     totalpris_found = False
@@ -149,26 +188,38 @@ def sanity_checks():
                 totalpris_found = True
                 print(f"Found table with Totalpris value: '{df['dd'].iloc[0]}'")
                 if df["dd"].iloc[0] == expected_totalpris:
-                    print(f"Found the expected table with columns dt and dd and totalpris={expected_totalpris}")
+                    print(f"Found the expected table with totalpris={expected_totalpris}")
                     break
     if not totalpris_found:
         raise ValueError("No table with the Totalpris column found")
     print("Sanity check passed for expected totalpris value")
-    
-    # Add a big green message at the end
+
     print(f"\n{GREEN}{BOLD}✓ ALL SANITY CHECKS PASSED SUCCESSFULLY! ✓{END}\n")
 
 if __name__ == "__main__":
-    
     print("Press 1 to run sanity checks")
     print("Press 2 to test a URL")
     choice = getch()
     print(f"\nYou selected: {choice}")
-    
+
     if choice == "1":
         sanity_checks()
     elif choice == "2":
-        url = input("Enter a URL: ")
-        test(url)
+        url_prompt = f"Enter a URL {f'[{previous_url}]' if previous_url else ''}: "
+        url_input = input(url_prompt)
+        # Use the previous URL if the user just hits Enter
+        url = url_input if url_input.strip() else previous_url or url_input
+        if url:
+            # Save the URL for future runs
+            try:
+                with open(URL_HISTORY_FILE, 'w') as f:
+                    f.write(url)
+            except Exception:
+                # If we can't save the URL, just continue
+                pass
+            previous_url = url
+            test(url)
+        else:
+            print("No URL provided")
     else:
         print("Invalid choice")
