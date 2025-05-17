@@ -80,21 +80,37 @@ class TableParserModel:
             all_dfs = get_tables(self.html_content)
             
             for i, df in enumerate(all_dfs):
-                if not df.empty:
-                    table_id = len(self.tables)
+                # Skip tables that are empty, contain only empty rows, or have columns but no actual data
+                if df.empty or df.dropna(how='all').empty:
+                    continue
                     
-                    # Create a descriptive name based on table columns or position
-                    if len(df.columns) > 0:
-                        column_preview = " ".join([str(col)[:10] for col in df.columns[:3]])
-                        name = f"Table {table_id+1}: {column_preview}"
-                    else:
-                        name = f"Table {table_id+1}"
+                # Also skip tables that have columns but all cells are empty or NaN
+                if not df.empty and df.shape[0] > 0 and df.shape[1] > 0:
+                    # Convert all values to string and check if any non-empty cell exists
+                    # (excluding column headers)
+                    has_data = False
+                    for _, row in df.iterrows():
+                        if not row.dropna().empty and any(str(val).strip() != '' for val in row.dropna()):
+                            has_data = True
+                            break
                     
-                    # Determine type based on shape and structure
-                    table_type = "standard"
+                    if not has_data:
+                        continue
                     
-                    self.tables.append({"id": table_id, "name": name, "type": table_type})
-                    self.table_dataframes[table_id] = df
+                table_id = len(self.tables)
+                
+                # Create a descriptive name based on table columns or position
+                if len(df.columns) > 0:
+                    column_preview = " ".join([str(col)[:10] for col in df.columns[:3]])
+                    name = f"Table {table_id+1}: {column_preview}"
+                else:
+                    name = f"Table {table_id+1}"
+                
+                # Determine type based on shape and structure
+                table_type = "standard"
+                
+                self.tables.append({"id": table_id, "name": name, "type": table_type})
+                self.table_dataframes[table_id] = df
         except Exception as e:
             logging.error(f"Error parsing tables: {str(e)}")
     
