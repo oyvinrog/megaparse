@@ -9,6 +9,7 @@ import termios
 import os
 import hashlib
 import re
+from io import StringIO
 # Add color constants
 GREEN = '\033[92m'
 BOLD = '\033[1m'
@@ -43,7 +44,7 @@ def extract_html_tables(soup):
     dfs = []
     for tbl in soup.find_all("table"):
         try:
-            dfs += pd.read_html(str(tbl))
+            dfs += pd.read_html(StringIO(str(tbl)))
         except ValueError:
             continue
     return dfs
