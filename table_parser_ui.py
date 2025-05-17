@@ -98,6 +98,7 @@ class TableParserUI(QMainWindow):
         preview_layout = QVBoxLayout(preview_widget)
         preview_layout.addWidget(QLabel("Table Preview:"))
         self.table_preview = QTableWidget()
+        self.table_preview.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         preview_layout.addWidget(self.table_preview)
         
         splitter.addWidget(preview_widget)
@@ -168,7 +169,7 @@ class TableParserUI(QMainWindow):
         table_id = item.data(Qt.ItemDataRole.UserRole)
         table_type = item.data(Qt.ItemDataRole.UserRole + 1)
         
-        df = self.model.get_table_preview(table_id)
+        df = self.model.get_table_preview(table_id, max_rows=100)
         
         if df is not None:
             self.display_dataframe(df)

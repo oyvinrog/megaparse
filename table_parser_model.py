@@ -65,7 +65,7 @@ class TableParserModel:
         """Return list of available tables"""
         return self.tables
     
-    def get_table_preview(self, table_id, max_rows=5):
+    def get_table_preview(self, table_id, max_rows=100):
         """Get preview of a specific table"""
         if table_id in self.table_dataframes:
             return self.table_dataframes[table_id].head(max_rows)
