@@ -13,6 +13,11 @@ class TableParserUI(QMainWindow):
         self.model = model
         self.init_ui()
         
+        # Load previously used URL into the URL textbox
+        last_url = self.model.get_last_url()
+        if last_url:
+            self.url_input.setText(last_url)
+        
     def init_ui(self):
         """Initialize user interface"""
         self.setWindowTitle("Web Table Parser")

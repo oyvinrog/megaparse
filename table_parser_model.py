@@ -1,6 +1,8 @@
 import requests
 import pandas as pd
 import logging
+import os
+import json
 from urllib.parse import urlparse
 from bs4 import BeautifulSoup
 from parser import get_tables
@@ -11,6 +13,7 @@ class TableParserModel:
         self.tables = []
         self.table_dataframes = {}
         self.html_content = ""
+        self.config_file = os.path.join(os.path.expanduser("~"), ".megaparse_config.json")
     
     def load_url(self, url, extraction_config=None):
         """Load a URL and parse tables"""
@@ -30,11 +33,45 @@ class TableParserModel:
             # Use the parser.py functions to extract tables
             self._parse_tables()
             
+            # Save the URL as the last used URL
+            self.save_last_url(url)
+            
             return True, f"Found {len(self.tables)} tables"
         except requests.exceptions.RequestException as e:
             return False, f"Error fetching URL: {str(e)}"
         except Exception as e:
             return False, f"Error parsing tables: {str(e)}"
+    
+    def save_last_url(self, url):
+        """Save the last used URL to config file"""
+        config = {}
+        if os.path.exists(self.config_file):
+            try:
+                with open(self.config_file, 'r') as f:
+                    config = json.load(f)
+            except:
+                config = {}
+        
+        config['last_url'] = url
+        
+        try:
+            with open(self.config_file, 'w') as f:
+                json.dump(config, f)
+        except Exception as e:
+            logging.error(f"Error saving config: {str(e)}")
+    
+    def get_last_url(self):
+        """Get the last used URL from config file"""
+        if not os.path.exists(self.config_file):
+            return ""
+            
+        try:
+            with open(self.config_file, 'r') as f:
+                config = json.load(f)
+                return config.get('last_url', "")
+        except Exception as e:
+            logging.error(f"Error loading config: {str(e)}")
+            return ""
     
     def _parse_tables(self):
         """Parse tables using parser.py functions"""
