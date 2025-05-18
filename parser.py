@@ -449,6 +449,251 @@ def find_key_value_structure(soup):
     
     return unique_pairs
 
+def find_text_numeric_tables(soup, min_rows=3, min_cols=2):
+    """
+    Identifies HTML structures that appear to be tables with a mix of text and numeric columns.
+    This function analyzes the data types in sibling elements to detect tabular structures,
+    even when they don't use traditional table HTML tags.
+    
+    Parameters:
+    -----------
+    soup : BeautifulSoup
+        The parsed HTML content
+    min_rows : int
+        Minimum number of rows to consider a valid table
+    min_cols : int
+        Minimum number of columns to consider a valid table
+        
+    Returns:
+    --------
+    list of DataFrames
+        Each DataFrame represents a detected table with text and numeric columns
+    """
+    tables = []
+    
+    # Look for potential containers that might hold table-like data
+    for container in soup.find_all(['div', 'ul', 'section', 'article']):
+        # Skip small containers
+        if len(container.get_text()) < 100:
+            continue
+        
+        # Find repeating elements that might be rows
+        child_tags = [child.name for child in container.find_all(recursive=False) 
+                      if child.name and not isinstance(child, (Comment, Doctype, ProcessingInstruction))]
+        
+        # Skip if no children or all children are different types
+        if not child_tags or len(set(child_tags)) == len(child_tags):
+            continue
+        
+        # Find the most common tag - likely to be row elements
+        most_common_tag = Counter(child_tags).most_common(1)[0][0]
+        potential_rows = container.find_all(most_common_tag, recursive=False)
+        
+        if len(potential_rows) < min_rows:
+            continue
+        
+        # For each potential row, extract text content
+        row_data = []
+        for row in potential_rows:
+            # Find elements that might be cells
+            cells = row.find_all(recursive=False)
+            if len(cells) < min_cols:
+                # Try to extract text nodes that might be separated by <br> tags or other inline elements
+                cell_contents = []
+                text_chunks = [t.strip() for t in row.get_text().split('\n') if t.strip()]
+                if len(text_chunks) >= min_cols:
+                    cell_contents = text_chunks
+            else:
+                cell_contents = [cell.get_text(strip=True) for cell in cells]
+            
+            if len(cell_contents) >= min_cols:
+                row_data.append(cell_contents)
+        
+        if len(row_data) < min_rows:
+            continue
+        
+        # Normalize row lengths
+        max_cols = max(len(row) for row in row_data)
+        normalized_rows = [row + [''] * (max_cols - len(row)) for row in row_data]
+        
+        # Check if we have a mix of text and numeric columns
+        has_numeric_column = False
+        has_text_column = False
+        
+        for col_idx in range(max_cols):
+            column_values = [row[col_idx] for row in normalized_rows if col_idx < len(row)]
+            
+            # Check if column has numeric values
+            numeric_count = sum(1 for val in column_values if val and re.match(r'^\s*[+-]?\d+[\d.,\s]*\s*%?\s*$', val))
+            
+            # Column is primarily numeric if more than 70% of values are numeric
+            if numeric_count > 0.7 * len(column_values):
+                has_numeric_column = True
+            elif sum(1 for val in column_values if val and len(val) > 1 and not val.isdigit()) > 0.5 * len(column_values):
+                has_text_column = True
+                
+        # If we have both text and numeric columns, we've found a table
+        if has_numeric_column and has_text_column:
+            df = pd.DataFrame(normalized_rows)
+            df.attrs['source'] = 'text_numeric_detection'
+            
+            # Try to determine header row if first row is different
+            if row_data and len(row_data) > 1:
+                first_row = row_data[0]
+                other_rows = row_data[1:]
+                
+                # Check if first row contains different data types than other rows
+                first_row_numeric = sum(1 for cell in first_row if cell and re.match(r'^\s*[+-]?\d+[\d.,\s]*\s*%?\s*$', cell))
+                other_rows_numeric = sum(1 for row in other_rows for cell in row 
+                                        if cell and re.match(r'^\s*[+-]?\d+[\d.,\s]*\s*%?\s*$', cell))
+                
+                # If first row has significantly fewer numerics, it might be a header
+                if first_row_numeric == 0 and other_rows_numeric > 0:
+                    header_row = normalized_rows[0]
+                    df.columns = header_row
+                    df = df.iloc[1:].reset_index(drop=True)
+            
+            tables.append(df)
+    
+    # Look for scattered but aligned data that might form a table
+    # This handles cases where table cells are not properly contained within a single parent
+    text_elements = []
+    for el in soup.find_all(text=True):
+        if el.strip() and not isinstance(el.parent, (Comment, Doctype, ProcessingInstruction)):
+            # Get the element's coordinates by traversing its parents
+            parent = el.parent
+            x_pos = 0
+            y_pos = 0
+            
+            # Use a simple heuristic - count siblings as y coordinate
+            siblings = list(parent.previous_siblings)
+            y_pos = len(siblings)
+            
+            # Calculate x position based on parent tags
+            ancestor = parent
+            while ancestor and ancestor != soup:
+                siblings = list(ancestor.previous_siblings)
+                x_pos += len(siblings) * 10  # Weight by depth
+                ancestor = ancestor.parent
+            
+            text_elements.append({
+                'text': el.strip(),
+                'x': x_pos,
+                'y': y_pos,
+                'is_numeric': bool(re.match(r'^\s*[+-]?\d+[\d.,\s]*\s*%?\s*$', el.strip()))
+            })
+    
+    # Group text elements by y-coordinate (potential rows)
+    y_groups = defaultdict(list)
+    for el in text_elements:
+        y_groups[el['y']].append(el)
+    
+    # Keep only rows with multiple elements
+    rows = [elements for y, elements in y_groups.items() if len(elements) >= min_cols]
+    
+    if len(rows) >= min_rows:
+        # Sort each row by x-coordinate
+        for row in rows:
+            row.sort(key=lambda el: el['x'])
+        
+        # Check if we have text and numeric columns
+        has_numeric_column = False
+        has_text_column = False
+        
+        # Transpose to check columns
+        max_cols = max(len(row) for row in rows)
+        columns = [[] for _ in range(max_cols)]
+        
+        for row in rows:
+            for i, el in enumerate(row):
+                if i < max_cols:
+                    columns[i].append(el)
+        
+        for column in columns:
+            # Count numeric elements in the column
+            numeric_count = sum(1 for el in column if el.get('is_numeric', False))
+            
+            if numeric_count > 0.7 * len(column):
+                has_numeric_column = True
+            elif sum(1 for el in column if not el.get('is_numeric', True) and len(el['text']) > 1) > 0.5 * len(column):
+                has_text_column = True
+        
+        if has_numeric_column and has_text_column:
+            # Create DataFrame from the aligned text elements
+            normalized_rows = []
+            for row in rows:
+                row_data = [el['text'] for el in row]
+                row_data += [''] * (max_cols - len(row_data))
+                normalized_rows.append(row_data)
+            
+            df = pd.DataFrame(normalized_rows)
+            df.attrs['source'] = 'aligned_text_detection'
+            tables.append(df)
+    
+    return tables
+
+def find_relations(soup):
+    import pandas as pd
+    from collections import Counter
+
+    relations = []
+
+    def extract_card_data(card):
+        """Extract key-value text content from visible card elements"""
+        data = {}
+        all_text = card.get_text(separator="\n", strip=True).split("\n")
+        # Try to identify values like price, location, title heuristically
+        for i, line in enumerate(all_text):
+            if "kr" in line.lower():
+                if "total" in line.lower():
+                    data["total_price"] = line
+                elif "kr" in line:
+                    data["price"] = line
+            elif i == 0:
+                data["location"] = line
+            elif i == 1:
+                data["title"] = line
+            else:
+                data[f"text_{i}"] = line
+        return data
+
+    # Find potential containers with repeating child structure
+    for container in soup.find_all(["div", "section"], recursive=True):
+        children = container.find_all(recursive=False)
+        if len(children) < 3:
+            continue
+
+        tag_counts = Counter(child.name for child in children)
+        most_common_tag, count = tag_counts.most_common(1)[0]
+
+        if count >= 3:
+            blocks = [child for child in children if child.name == most_common_tag]
+            block_data = [extract_card_data(block) for block in blocks if block.get_text(strip=True)]
+
+            # Heuristic: ensure data has some 'price' content and is not just text
+            if any("price" in row for row in block_data):
+                df = pd.DataFrame(block_data)
+                relations.append(df)
+
+    return relations
+
+def score_table(table):
+    """Score table based on presence of numeric columns."""
+    # Check each column
+    for col in table.columns:
+        # Check if the column is numeric or can be converted to numeric
+        try:
+            # Try to see if the column is already numeric
+            if pd.api.types.is_numeric_dtype(table[col]):
+                return 1
+            
+            # If not, try to convert to numeric
+            pd.to_numeric(table[col])
+            return 1
+        except:
+            pass
+    return 0
+
 def get_tables(content):
     """
     Parses arbitrary HTML and returns a list of pandas.DataFrame,
@@ -456,14 +701,32 @@ def get_tables(content):
     """
     soup = BeautifulSoup(content, "lxml")
     
-    tables = extract_html_tables(soup)
-    tables += find_repeated_structures(soup)
-    tables += find_visual_blocks(soup)
-    tables += find_repeated_class_blocks(soup)
-    tables += find_dense_blocks(soup)
-    tables += find_semantically_similar_blocks(soup)
-    tables += find_data_patterns(soup)
-    
+    tables = []
+    # clear the scores.log
+    with open("scores.log", "w") as f:
+        f.write("")
+    # Later, we will use these functions and score which is the best 
+    functions = [find_repeated_structures, find_visual_blocks, \
+                 find_repeated_class_blocks, find_dense_blocks, find_semantically_similar_blocks, \
+                    find_data_patterns, find_text_numeric_tables, find_relations]
+
+    for function in functions:
+        tables += function(soup)
+
+        # Score the function. If this is a table with atomic values (i.e. only numbers or only strings), it is good.
+        # If it is a table with mixed values, it is bad.
+        # If it is a table with non-tabular data, it is bad.
+
+        score = sum([score_table(table) for table in tables]) 
+        
+        # Log to scores.log
+        with open("scores.log", "a") as f:
+            f.write(f"{function.__name__}: {score}\n")
+
+        print(f"{function.__name__}: {score}")
+
+
+
     # Filter out tables with only one row or one column
     filtered_tables = [df for df in tables if df.shape[0] > 1 and df.shape[1] > 1]
     
@@ -532,19 +795,13 @@ def sanity_checks():
     print(f"\n{GREEN}{BOLD}✓ ALL SANITY CHECKS PASSED SUCCESSFULLY! ✓{END}\n")
 
 if __name__ == "__main__":
-    print("Press 1 to run sanity checks")
-    print("Press 2 to test a URL")
-    choice = getch()
-    print(f"\nYou selected: {choice}")
-
-    if choice == "1":
-        sanity_checks()
-    elif choice == "2":
-        url_prompt = f"Enter a URL {f'[{previous_url}]' if previous_url else ''}: "
-        url_input = input(url_prompt)
-        # Use the previous URL if the user just hits Enter
-        url = url_input if url_input.strip() else previous_url or url_input
-        if url:
+    # Check if command line argument is provided
+    if len(sys.argv) > 1:
+        if sys.argv[1] == "sanity":
+            sanity_checks()
+        elif sys.argv[1].startswith("http"):
+            # Treat the argument as a URL
+            url = sys.argv[1]
             # Save the URL for future runs
             try:
                 with open(URL_HISTORY_FILE, 'w') as f:
@@ -552,9 +809,39 @@ if __name__ == "__main__":
             except Exception:
                 # If we can't save the URL, just continue
                 pass
-            previous_url = url
             test(url)
         else:
-            print("No URL provided")
+            print(f"Invalid argument: {sys.argv[1]}")
+            print("Usage: python parser.py [sanity|URL]")
     else:
-        print("Invalid choice")
+        # Interactive mode
+        print("Press 1 to run sanity checks")
+        print("Press 2 to test a URL")
+        try:
+            choice = getch()
+            print(f"\nYou selected: {choice}")
+
+            if choice == "1":
+                sanity_checks()
+            elif choice == "2":
+                url_prompt = f"Enter a URL {f'[{previous_url}]' if previous_url else ''}: "
+                url_input = input(url_prompt)
+                # Use the previous URL if the user just hits Enter
+                url = url_input if url_input.strip() else previous_url or url_input
+                if url:
+                    # Save the URL for future runs
+                    try:
+                        with open(URL_HISTORY_FILE, 'w') as f:
+                            f.write(url)
+                    except Exception:
+                        # If we can't save the URL, just continue
+                        pass
+                    previous_url = url
+                    test(url)
+                else:
+                    print("No URL provided")
+            else:
+                print("Invalid choice")
+        except Exception as e:
+            print(f"Error in interactive mode: {e}")
+            print("Try using command line arguments: python parser.py [sanity|URL]")
