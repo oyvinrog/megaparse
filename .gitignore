@@ -7,3 +7,4 @@ __pycache__/
 *.pyz
 .url_history
 scores.log
+parse_site.py
