@@ -100,6 +100,7 @@ print(re.findall(r"{regex}", content))
     
     print("Code generated in parse_site.py")
 
-# Example usage:
-url = "https://www.finn.no/realestate/homes/search.html?filters=&location=0.20061"
-generate_code(url, ["3&nbsp;700&nbsp;000&nbsp;kr","10&nbsp;900&nbsp;000&nbsp;kr","19&nbsp;900&nbsp;000&nbsp;kr"])
+if __name__ == "__main__":
+    # Example usage:
+    url = "https://www.finn.no/realestate/homes/search.html?filters=&location=0.20061"
+    generate_code(url, ["3&nbsp;700&nbsp;000&nbsp;kr","10&nbsp;900&nbsp;000&nbsp;kr","19&nbsp;900&nbsp;000&nbsp;kr"])
