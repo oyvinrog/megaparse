@@ -250,4 +250,12 @@ class TableParserModel:
         if not target_columns:
             return 0.0
         scores = [best_match_for_target(target) for target in target_columns]
-        return sum(scores) / len(scores) if scores else 0.0 
+        return sum(scores) / len(scores) if scores else 0.0
+
+    def remove_table(self, table_id):
+        """Remove a table from the model."""
+        # Remove from tables list
+        self.tables = [table for table in self.tables if table["id"] != table_id]
+        # Remove from dataframes dict
+        if table_id in self.table_dataframes:
+            del self.table_dataframes[table_id] 

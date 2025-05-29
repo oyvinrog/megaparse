@@ -306,6 +306,11 @@ class TableParserUI(QMainWindow):
         self.div_table_check.setChecked(True)
         type_layout.addWidget(self.div_table_check)
         
+        # Add remove low score button
+        self.remove_low_score_button = QPushButton("Remove Low Score Tables")
+        self.remove_low_score_button.clicked.connect(self.remove_low_score_tables)
+        type_layout.addWidget(self.remove_low_score_button)
+        
         main_layout.addLayout(type_layout)
         
         # Column similarity input
@@ -481,6 +486,58 @@ class TableParserUI(QMainWindow):
                         similarity_indicator = "🟢"
                     display_text = f"{item.text().split(' ', 2)[0]} {similarity_indicator} {table['name']} (target sim: {match_score:.2f})"
                     item.setText(display_text)
+    
+    def remove_low_score_tables(self):
+        """Remove tables with low entropy or similarity scores"""
+        # Get all tables
+        tables = self.model.get_tables()
+        if not tables:
+            return
+            
+        # Get target columns for similarity if any
+        target_columns = [col.strip() for col in self.similarity_input.text().split(',') if col.strip()]
+        
+        # Get entropy scores
+        scores = self.model.get_table_scores()
+        if not scores:
+            return
+            
+        # Create a mapping of table IDs to their entropy scores
+        score_map = {score["id"]: score["entropy"] for score in scores}
+        
+        # Filter tables with low scores
+        low_score_tables = []
+        for table in tables:
+            table_id = table["id"]
+            df = self.model.get_table_preview(table_id)
+            if df is not None:
+                # Check both entropy and similarity scores if target columns are specified
+                entropy_score = score_map.get(table_id, 0)
+                similarity_score = 0
+                
+                if target_columns:
+                    similarity_score = self.model.target_column_match_score(df, target_columns)
+                    # If we have similarity scores, use those instead of entropy
+                    if similarity_score < 0.3:
+                        low_score_tables.append(table)
+                else:
+                    # If no similarity targets, use entropy scores
+                    if entropy_score < 0.3:
+                        low_score_tables.append(table)
+        
+        if not low_score_tables:
+            return
+            
+        # Remove tables with low scores
+        for table in low_score_tables:
+            self.model.remove_table(table["id"])
+            
+        self.update_ui()
+        # Update the message based on which type of score was used
+        if target_columns:
+            self.statusBar().showMessage("Low similarity score tables removed")
+        else:
+            self.statusBar().showMessage("Low entropy score tables removed")
     
     def show_error(self, message):
         """Show error message"""
