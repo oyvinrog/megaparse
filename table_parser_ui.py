@@ -43,6 +43,206 @@ class ScoreBar(QWidget):
         painter.setPen(QPen(Qt.GlobalColor.black))
         painter.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, f"{self.score:.2f}")
 
+class TableListWidget(QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.init_ui()
+        
+    def init_ui(self):
+        layout = QVBoxLayout(self)
+        layout.addWidget(QLabel("Available Tables:"))
+        
+        self.tables_list = QListWidget()
+        layout.addWidget(self.tables_list)
+        
+        # Table info section
+        self.table_info = QTextBrowser()
+        self.table_info.setMaximumHeight(100)
+        layout.addWidget(QLabel("Table Information:"))
+        layout.addWidget(self.table_info)
+        
+        # Download button
+        button_layout = QHBoxLayout()
+        self.download_button = QPushButton("Save Selected Table")
+        self.download_button.setEnabled(False)
+        button_layout.addWidget(self.download_button)
+        
+        # Format selection
+        format_layout = QHBoxLayout()
+        format_layout.addWidget(QLabel("Format:"))
+        self.format_combo = QComboBox()
+        self.format_combo.addItems(["Parquet", "CSV", "Excel"])
+        format_layout.addWidget(self.format_combo)
+        button_layout.addLayout(format_layout)
+        
+        layout.addLayout(button_layout)
+    
+    def update_tables_list(self, tables, scores):
+        self.tables_list.clear()
+        
+        type_icons = {
+            "standard": "🔵",  # Standard HTML Tables
+            "pandas": "🟢",    # Advanced Tables via pandas
+            "div": "🟠"        # Div-based Tables
+        }
+        
+        # Create a mapping of table IDs to their entropy scores
+        score_map = {score["id"]: score["entropy"] for score in scores}
+        
+        for table in tables:
+            table_type = table.get("type", "unknown")
+            icon = type_icons.get(table_type, "⚪")
+            entropy_score = score_map.get(table["id"], 0)
+            
+            # Create a colored indicator based on entropy
+            if entropy_score < 0.3:
+                entropy_indicator = "🔴"  # Red for low entropy
+            elif entropy_score < 0.7:
+                entropy_indicator = "🟡"  # Yellow for medium entropy
+            else:
+                entropy_indicator = "🟢"  # Green for high entropy
+                
+            display_text = f"{icon} {entropy_indicator} {table['name']}"
+            
+            item = QListWidgetItem(display_text)
+            item.setData(Qt.ItemDataRole.UserRole, table["id"])
+            item.setData(Qt.ItemDataRole.UserRole + 1, table_type)
+            self.tables_list.addItem(item)
+    
+    def update_table_info(self, df, table_type):
+        if df is not None:
+            rows, cols = df.shape
+            
+            type_descriptions = {
+                "standard": "Standard HTML Table - Extracted from <table> elements in the page",
+                "pandas": "Advanced Table - Detected by pandas read_html",
+                "div": "Structured Content - Extracted from div-based layouts resembling tables"
+            }
+            
+            type_desc = type_descriptions.get(table_type, "Unknown table type")
+            
+            info_html = f"""
+            <p><b>Type:</b> {type_desc}</p>
+            <p><b>Dimensions:</b> {rows} rows × {cols} columns</p>
+            <p><b>Column Names:</b> {', '.join(str(col) for col in df.columns[:5])}{' ...' if len(df.columns) > 5 else ''}</p>
+            """
+            self.table_info.setHtml(info_html)
+        else:
+            self.table_info.clear()
+
+class ScoreVisualizationWidget(QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.init_ui()
+        
+    def init_ui(self):
+        layout = QVBoxLayout(self)
+        layout.addWidget(QLabel("Table Entropy Scores:"))
+        
+        self.score_list = QListWidget()
+        layout.addWidget(self.score_list)
+    
+    def update_scores(self, scores):
+        self.score_list.clear()
+        
+        for score_info in scores:
+            item = QListWidgetItem()
+            widget = QWidget()
+            layout = QVBoxLayout(widget)
+            
+            # Table name and dimensions
+            info_label = QLabel(f"{score_info['name']} ({score_info['rows']}×{score_info['cols']})")
+            layout.addWidget(info_label)
+            
+            # Score bar
+            score_bar = ScoreBar(score_info['entropy'])
+            layout.addWidget(score_bar)
+            
+            widget.setLayout(layout)
+            item.setSizeHint(widget.sizeHint())
+            
+            self.score_list.addItem(item)
+            self.score_list.setItemWidget(item, widget)
+
+class TablePreviewWidget(QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.init_ui()
+        
+    def init_ui(self):
+        layout = QVBoxLayout(self)
+        layout.addWidget(QLabel("Table Preview:"))
+        self.table_preview = QTableWidget()
+        self.table_preview.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        layout.addWidget(self.table_preview)
+    
+    def display_dataframe(self, df):
+        """Display pandas DataFrame in the table widget"""
+        self.table_preview.clear()
+        
+        if df is None:
+            return
+            
+        # Set table dimensions
+        rows, cols = df.shape
+        self.table_preview.setRowCount(rows)
+        self.table_preview.setColumnCount(cols)
+        
+        # Calculate entropy for each column
+        column_entropies = []
+        for col in df.columns:
+            try:
+                # Convert column to string and count frequencies
+                value_counts = df[col].fillna('').astype(str).value_counts()
+                if len(value_counts) > 1:
+                    e = entropy(value_counts)
+                    max_entropy = np.log(len(value_counts))
+                    normalized_entropy = e / max_entropy if max_entropy > 0 else 0
+                else:
+                    normalized_entropy = 0
+            except:
+                normalized_entropy = 0
+            column_entropies.append(normalized_entropy)
+        
+        # Set headers with entropy information
+        headers = []
+        for j, col in enumerate(df.columns):
+            # Create header text with entropy score
+            entropy_score = column_entropies[j]
+            header_text = f"{col}\n{entropy_score:.2f}"
+            
+            # Create header item
+            header_item = QTableWidgetItem(header_text)
+            
+            # Set background color based on entropy
+            if entropy_score < 0.3:
+                color = QColor(255, 200, 200)  # Light red for low entropy
+            elif entropy_score < 0.7:
+                color = QColor(255, 255, 200)  # Light yellow for medium entropy
+            else:
+                color = QColor(200, 255, 200)  # Light green for high entropy
+            
+            header_item.setBackground(color)
+            headers.append(header_item)
+        
+        self.table_preview.setHorizontalHeaderLabels([""] * cols)
+        for j, header_item in enumerate(headers):
+            self.table_preview.setHorizontalHeaderItem(j, header_item)
+        
+        # Populate data
+        for i in range(rows):
+            for j in range(cols):
+                value = df.iloc[i, j]
+                item = QTableWidgetItem(str(value))
+                self.table_preview.setItem(i, j, item)
+        
+        # Adjust header height to accommodate entropy score
+        header = self.table_preview.horizontalHeader()
+        current_size = header.defaultSectionSize()
+        header.setDefaultSectionSize(int(current_size * 1.5))
+        
+        self.table_preview.resizeColumnsToContents()
+
 class TableParserUI(QMainWindow):
     def __init__(self, model):
         super().__init__()
@@ -100,60 +300,20 @@ class TableParserUI(QMainWindow):
         # Splitter for tables list, scores, and preview
         splitter = QSplitter(Qt.Orientation.Horizontal)
         
-        # Tables list and info
-        left_widget = QWidget()
-        left_layout = QVBoxLayout(left_widget)
-        left_layout.addWidget(QLabel("Available Tables:"))
+        # Initialize components
+        self.table_list_widget = TableListWidget()
+        self.score_widget = ScoreVisualizationWidget()
+        self.preview_widget = TablePreviewWidget()
         
-        self.tables_list = QListWidget()
-        self.tables_list.itemClicked.connect(self.on_table_selected)
-        self.tables_list.currentItemChanged.connect(self.on_table_selected)
-        left_layout.addWidget(self.tables_list)
+        # Connect signals
+        self.table_list_widget.tables_list.itemClicked.connect(self.on_table_selected)
+        self.table_list_widget.tables_list.currentItemChanged.connect(self.on_table_selected)
+        self.table_list_widget.download_button.clicked.connect(self.save_table)
         
-        # Table info section
-        self.table_info = QTextBrowser()
-        self.table_info.setMaximumHeight(100)
-        left_layout.addWidget(QLabel("Table Information:"))
-        left_layout.addWidget(self.table_info)
-        
-        # Download button
-        button_layout = QHBoxLayout()
-        self.download_button = QPushButton("Save Selected Table")
-        self.download_button.clicked.connect(self.save_table)
-        self.download_button.setEnabled(False)
-        button_layout.addWidget(self.download_button)
-        
-        # Format selection
-        format_layout = QHBoxLayout()
-        format_layout.addWidget(QLabel("Format:"))
-        self.format_combo = QComboBox()
-        self.format_combo.addItems(["Parquet", "CSV", "Excel"])
-        format_layout.addWidget(self.format_combo)
-        button_layout.addLayout(format_layout)
-        
-        left_layout.addLayout(button_layout)
-        
-        splitter.addWidget(left_widget)
-        
-        # Score visualization panel
-        score_widget = QWidget()
-        score_layout = QVBoxLayout(score_widget)
-        score_layout.addWidget(QLabel("Table Entropy Scores:"))
-        
-        self.score_list = QListWidget()
-        score_layout.addWidget(self.score_list)
-        
-        splitter.addWidget(score_widget)
-        
-        # Table preview
-        preview_widget = QWidget()
-        preview_layout = QVBoxLayout(preview_widget)
-        preview_layout.addWidget(QLabel("Table Preview:"))
-        self.table_preview = QTableWidget()
-        self.table_preview.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
-        preview_layout.addWidget(self.table_preview)
-        
-        splitter.addWidget(preview_widget)
+        # Add widgets to splitter
+        splitter.addWidget(self.table_list_widget)
+        splitter.addWidget(self.score_widget)
+        splitter.addWidget(self.preview_widget)
         splitter.setSizes([300, 200, 700])
         
         main_layout.addWidget(splitter)
@@ -174,11 +334,11 @@ class TableParserUI(QMainWindow):
             return
             
         self.statusBar().showMessage("Fetching tables...")
-        self.tables_list.clear()
-        self.score_list.clear()
-        self.table_preview.clear()
-        self.table_info.clear()
-        self.download_button.setEnabled(False)
+        self.table_list_widget.tables_list.clear()
+        self.score_widget.score_list.clear()
+        self.preview_widget.table_preview.clear()
+        self.table_list_widget.table_info.clear()
+        self.table_list_widget.download_button.setEnabled(False)
         
         # Configure which table types to extract
         extraction_config = {
@@ -189,48 +349,19 @@ class TableParserUI(QMainWindow):
         
         success, message = self.model.load_url(url, extraction_config)
         if success:
-            self.update_tables_list()
-            self.update_score_list()
+            self.update_ui()
             self.statusBar().showMessage(message)
         else:
             self.show_error(message)
             self.statusBar().showMessage("Error: " + message)
     
-    def update_tables_list(self):
-        """Update the tables list widget"""
+    def update_ui(self):
+        """Update all UI components with current model state"""
         tables = self.model.get_tables()
         scores = self.model.get_table_scores()
-        self.tables_list.clear()
         
-        type_icons = {
-            "standard": "🔵",  # Standard HTML Tables
-            "pandas": "🟢",    # Advanced Tables via pandas
-            "div": "🟠"        # Div-based Tables
-        }
-        
-        # Create a mapping of table IDs to their entropy scores
-        score_map = {score["id"]: score["entropy"] for score in scores}
-        
-        for table in tables:
-            table_type = table.get("type", "unknown")
-            icon = type_icons.get(table_type, "⚪")
-            entropy_score = score_map.get(table["id"], 0)
-            
-            # Create a colored indicator based on entropy
-            if entropy_score < 0.3:
-                entropy_indicator = "🔴"  # Red for low entropy
-            elif entropy_score < 0.7:
-                entropy_indicator = "🟡"  # Yellow for medium entropy
-            else:
-                entropy_indicator = "🟢"  # Green for high entropy
-                
-            display_text = f"{icon} {entropy_indicator} {table['name']}"
-            
-            item = QListWidgetItem(display_text)
-            item.setData(Qt.ItemDataRole.UserRole, table["id"])
-            # Store the table type for displaying info later
-            item.setData(Qt.ItemDataRole.UserRole + 1, table_type)
-            self.tables_list.addItem(item)
+        self.table_list_widget.update_tables_list(tables, scores)
+        self.score_widget.update_scores(scores)
     
     def on_table_selected(self, item):
         """Handle table selection"""
@@ -243,109 +374,26 @@ class TableParserUI(QMainWindow):
         df = self.model.get_table_preview(table_id, max_rows=100)
         
         if df is not None:
-            self.display_dataframe(df)
-            self.download_button.setEnabled(True)
-            self.download_button.setProperty("table_id", table_id)
-            
-            # Display table information
-            rows, cols = df.shape
-            self.table_info.clear()
-            
-            type_descriptions = {
-                "standard": "Standard HTML Table - Extracted from <table> elements in the page",
-                "pandas": "Advanced Table - Detected by pandas read_html",
-                "div": "Structured Content - Extracted from div-based layouts resembling tables"
-            }
-            
-            type_desc = type_descriptions.get(table_type, "Unknown table type")
-            
-            info_html = f"""
-            <p><b>Type:</b> {type_desc}</p>
-            <p><b>Dimensions:</b> {rows} rows × {cols} columns</p>
-            <p><b>Column Names:</b> {', '.join(str(col) for col in df.columns[:5])}{' ...' if len(df.columns) > 5 else ''}</p>
-            """
-            self.table_info.setHtml(info_html)
-            
+            self.preview_widget.display_dataframe(df)
+            self.table_list_widget.download_button.setEnabled(True)
+            self.table_list_widget.download_button.setProperty("table_id", table_id)
+            self.table_list_widget.update_table_info(df, table_type)
             self.statusBar().showMessage(f"Table {table_id} selected")
         else:
-            self.table_preview.clear()
-            self.table_info.clear()
-            self.download_button.setEnabled(False)
+            self.preview_widget.table_preview.clear()
+            self.table_list_widget.table_info.clear()
+            self.table_list_widget.download_button.setEnabled(False)
             self.statusBar().showMessage("Error loading table preview")
-    
-    def display_dataframe(self, df):
-        """Display pandas DataFrame in the table widget"""
-        self.table_preview.clear()
-        
-        # Set table dimensions
-        rows, cols = df.shape
-        self.table_preview.setRowCount(rows)
-        self.table_preview.setColumnCount(cols)
-        
-        # Calculate entropy for each column
-        column_entropies = []
-        for col in df.columns:
-            try:
-                # Convert column to string and count frequencies
-                value_counts = df[col].fillna('').astype(str).value_counts()
-                if len(value_counts) > 1:
-                    e = entropy(value_counts)
-                    max_entropy = np.log(len(value_counts))
-                    normalized_entropy = e / max_entropy if max_entropy > 0 else 0
-                else:
-                    normalized_entropy = 0
-            except:
-                normalized_entropy = 0
-            column_entropies.append(normalized_entropy)
-        
-        # Set headers with entropy information
-        headers = []
-        for j, col in enumerate(df.columns):
-            # Create header text with entropy score
-            entropy_score = column_entropies[j]
-            header_text = f"{col}\n{entropy_score:.2f}"
-            
-            # Create header item
-            header_item = QTableWidgetItem(header_text)
-            
-            # Set background color based on entropy
-            if entropy_score < 0.3:
-                color = QColor(255, 200, 200)  # Light red for low entropy
-            elif entropy_score < 0.7:
-                color = QColor(255, 255, 200)  # Light yellow for medium entropy
-            else:
-                color = QColor(200, 255, 200)  # Light green for high entropy
-            
-            header_item.setBackground(color)
-            headers.append(header_item)
-        
-        self.table_preview.setHorizontalHeaderLabels([""] * cols)  # Set empty labels first
-        for j, header_item in enumerate(headers):
-            self.table_preview.setHorizontalHeaderItem(j, header_item)
-        
-        # Populate data
-        for i in range(rows):
-            for j in range(cols):
-                value = df.iloc[i, j]
-                item = QTableWidgetItem(str(value))
-                self.table_preview.setItem(i, j, item)
-        
-        # Adjust header height to accommodate entropy score
-        header = self.table_preview.horizontalHeader()
-        current_size = header.defaultSectionSize()
-        header.setDefaultSectionSize(int(current_size * 1.5))
-        
-        self.table_preview.resizeColumnsToContents()
     
     def save_table(self):
         """Save the selected table to a file"""
-        table_id = self.download_button.property("table_id")
+        table_id = self.table_list_widget.download_button.property("table_id")
         
         if table_id is None:
             self.show_error("No table selected")
             return
         
-        selected_format = self.format_combo.currentText()
+        selected_format = self.table_list_widget.format_combo.currentText()
         file_filter = ""
         file_extension = ""
         
@@ -378,28 +426,4 @@ class TableParserUI(QMainWindow):
     
     def show_error(self, message):
         """Show error message"""
-        QMessageBox.critical(self, "Error", message)
-
-    def update_score_list(self):
-        """Update the score visualization panel"""
-        self.score_list.clear()
-        scores = self.model.get_table_scores()
-        
-        for score_info in scores:
-            item = QListWidgetItem()
-            widget = QWidget()
-            layout = QVBoxLayout(widget)
-            
-            # Table name and dimensions
-            info_label = QLabel(f"{score_info['name']} ({score_info['rows']}×{score_info['cols']})")
-            layout.addWidget(info_label)
-            
-            # Score bar
-            score_bar = ScoreBar(score_info['entropy'])
-            layout.addWidget(score_bar)
-            
-            widget.setLayout(layout)
-            item.setSizeHint(widget.sizeHint())
-            
-            self.score_list.addItem(item)
-            self.score_list.setItemWidget(item, widget) 
+        QMessageBox.critical(self, "Error", message) 
