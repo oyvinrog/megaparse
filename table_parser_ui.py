@@ -130,40 +130,6 @@ class TableListWidget(QWidget):
         else:
             self.table_info.clear()
 
-class ScoreVisualizationWidget(QWidget):
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.init_ui()
-        
-    def init_ui(self):
-        layout = QVBoxLayout(self)
-        layout.addWidget(QLabel("Table Entropy Scores:"))
-        
-        self.score_list = QListWidget()
-        layout.addWidget(self.score_list)
-    
-    def update_scores(self, scores):
-        self.score_list.clear()
-        
-        for score_info in scores:
-            item = QListWidgetItem()
-            widget = QWidget()
-            layout = QVBoxLayout(widget)
-            
-            # Table name and dimensions
-            info_label = QLabel(f"{score_info['name']} ({score_info['rows']}×{score_info['cols']})")
-            layout.addWidget(info_label)
-            
-            # Score bar
-            score_bar = ScoreBar(score_info['entropy'])
-            layout.addWidget(score_bar)
-            
-            widget.setLayout(layout)
-            item.setSizeHint(widget.sizeHint())
-            
-            self.score_list.addItem(item)
-            self.score_list.setItemWidget(item, widget)
-
 class TablePreviewWidget(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -297,12 +263,11 @@ class TableParserUI(QMainWindow):
         
         main_layout.addLayout(options_layout)
         
-        # Splitter for tables list, scores, and preview
+        # Splitter for tables list and preview (removed scores)
         splitter = QSplitter(Qt.Orientation.Horizontal)
         
         # Initialize components
         self.table_list_widget = TableListWidget()
-        self.score_widget = ScoreVisualizationWidget()
         self.preview_widget = TablePreviewWidget()
         
         # Connect signals
@@ -310,11 +275,10 @@ class TableParserUI(QMainWindow):
         self.table_list_widget.tables_list.currentItemChanged.connect(self.on_table_selected)
         self.table_list_widget.download_button.clicked.connect(self.save_table)
         
-        # Add widgets to splitter
+        # Add widgets to splitter (removed score_widget)
         splitter.addWidget(self.table_list_widget)
-        splitter.addWidget(self.score_widget)
         splitter.addWidget(self.preview_widget)
-        splitter.setSizes([300, 200, 700])
+        splitter.setSizes([400, 1000])
         
         main_layout.addWidget(splitter)
         
@@ -335,7 +299,6 @@ class TableParserUI(QMainWindow):
             
         self.statusBar().showMessage("Fetching tables...")
         self.table_list_widget.tables_list.clear()
-        self.score_widget.score_list.clear()
         self.preview_widget.table_preview.clear()
         self.table_list_widget.table_info.clear()
         self.table_list_widget.download_button.setEnabled(False)
@@ -361,7 +324,6 @@ class TableParserUI(QMainWindow):
         scores = self.model.get_table_scores()
         
         self.table_list_widget.update_tables_list(tables, scores)
-        self.score_widget.update_scores(scores)
     
     def on_table_selected(self, item):
         """Handle table selection"""
