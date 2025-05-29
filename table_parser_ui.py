@@ -208,6 +208,54 @@ class TablePreviewWidget(QWidget):
         header.setDefaultSectionSize(int(current_size * 1.5))
         
         self.table_preview.resizeColumnsToContents()
+    
+    def display_dataframe_with_similarity(self, df, similarity_scores, header_labels=None, header_row_index=None):
+        """Display pandas DataFrame with similarity-based coloring and custom header labels if provided."""
+        self.table_preview.clear()
+        if df is None:
+            return
+        rows, cols = df.shape
+        self.table_preview.setRowCount(rows)
+        self.table_preview.setColumnCount(cols)
+        # Set headers with similarity information
+        headers = []
+        labels = header_labels if header_labels is not None else df.columns
+        for j, col in enumerate(labels):
+            similarity_score = similarity_scores[j]
+            header_text = f"{col}\n{similarity_score:.2f}"
+            header_item = QTableWidgetItem(header_text)
+            if similarity_score < 0.3:
+                color = QColor(255, 200, 200)
+            elif similarity_score < 0.7:
+                color = QColor(255, 255, 200)
+            else:
+                color = QColor(200, 255, 200)
+            header_item.setBackground(color)
+            headers.append(header_item)
+        self.table_preview.setHorizontalHeaderLabels([""] * cols)
+        for j, header_item in enumerate(headers):
+            self.table_preview.setHorizontalHeaderItem(j, header_item)
+        # Populate data
+        for i in range(rows):
+            for j in range(cols):
+                value = df.iloc[i, j]
+                item = QTableWidgetItem(str(value))
+                self.table_preview.setItem(i, j, item)
+        # Adjust header height
+        header = self.table_preview.horizontalHeader()
+        current_size = header.defaultSectionSize()
+        header.setDefaultSectionSize(int(current_size * 1.5))
+        self.table_preview.resizeColumnsToContents()
+        # Show a note if header row is not the default
+        if header_row_index is not None:
+            note = QLabel(f"Header row detected at row {header_row_index+1} (highlighted above)")
+            note.setStyleSheet("color: #888; font-size: 11px;")
+            layout = self.layout()
+            if layout.count() < 3:
+                layout.addWidget(note)
+            else:
+                # Replace previous note
+                layout.itemAt(2).widget().setText(note.text())
 
 class TableParserUI(QMainWindow):
     def __init__(self, model):
@@ -222,48 +270,59 @@ class TableParserUI(QMainWindow):
         
     def init_ui(self):
         """Initialize user interface"""
-        self.setWindowTitle("Web Table Parser")
-        self.setGeometry(100, 100, 1400, 800)
+        self.setWindowTitle("Table Parser")
+        self.setGeometry(100, 100, 1200, 800)
         
         # Main layout
         main_layout = QVBoxLayout()
         
-        # URL input
+        # URL input section
         url_layout = QHBoxLayout()
         url_layout.addWidget(QLabel("URL:"))
         self.url_input = QLineEdit()
-        self.url_input.setPlaceholderText("Enter webpage URL")
+        self.url_input.setText(self.model.get_last_url())
         url_layout.addWidget(self.url_input)
+        
+        # Fetch button
         self.fetch_button = QPushButton("Fetch Tables")
         self.fetch_button.clicked.connect(self.fetch_tables)
         url_layout.addWidget(self.fetch_button)
+        
         main_layout.addLayout(url_layout)
         
-        # Options for parsing
-        options_layout = QHBoxLayout()
+        # Table type selection
+        type_layout = QHBoxLayout()
+        type_layout.addWidget(QLabel("Table Types:"))
         
-        # Table types group
-        table_types_group = QGroupBox("Table Types to Extract")
-        table_types_layout = QHBoxLayout()
-        
-        self.standard_table_check = QCheckBox("Standard HTML Tables")
+        self.standard_table_check = QCheckBox("Standard Tables")
         self.standard_table_check.setChecked(True)
-        table_types_layout.addWidget(self.standard_table_check)
+        type_layout.addWidget(self.standard_table_check)
         
         self.advanced_table_check = QCheckBox("Advanced Tables")
         self.advanced_table_check.setChecked(True)
-        table_types_layout.addWidget(self.advanced_table_check)
+        type_layout.addWidget(self.advanced_table_check)
         
-        self.div_table_check = QCheckBox("Div-Based Tables")
+        self.div_table_check = QCheckBox("Div-based Tables")
         self.div_table_check.setChecked(True)
-        table_types_layout.addWidget(self.div_table_check)
+        type_layout.addWidget(self.div_table_check)
         
-        table_types_group.setLayout(table_types_layout)
-        options_layout.addWidget(table_types_group)
+        main_layout.addLayout(type_layout)
         
-        main_layout.addLayout(options_layout)
+        # Column similarity input
+        similarity_layout = QHBoxLayout()
+        similarity_layout.addWidget(QLabel("Color by Similarity (comma-separated column names):"))
+        self.similarity_input = QLineEdit()
+        self.similarity_input.setPlaceholderText("e.g., price, date, name")
+        similarity_layout.addWidget(self.similarity_input)
         
-        # Splitter for tables list and preview (removed scores)
+        # Add a button to apply similarity coloring
+        self.apply_similarity_button = QPushButton("Apply Similarity")
+        self.apply_similarity_button.clicked.connect(self.update_table_colors)
+        similarity_layout.addWidget(self.apply_similarity_button)
+        
+        main_layout.addLayout(similarity_layout)
+        
+        # Splitter for tables list and preview
         splitter = QSplitter(Qt.Orientation.Horizontal)
         
         # Initialize components
@@ -275,7 +334,7 @@ class TableParserUI(QMainWindow):
         self.table_list_widget.tables_list.currentItemChanged.connect(self.on_table_selected)
         self.table_list_widget.download_button.clicked.connect(self.save_table)
         
-        # Add widgets to splitter (removed score_widget)
+        # Add widgets to splitter
         splitter.addWidget(self.table_list_widget)
         splitter.addWidget(self.preview_widget)
         splitter.setSizes([400, 1000])
@@ -289,7 +348,10 @@ class TableParserUI(QMainWindow):
         
         # Status
         self.statusBar().showMessage("Ready")
-    
+        
+        # Store current table ID for similarity coloring
+        self.current_table_id = None
+
     def fetch_tables(self):
         """Fetch tables from the URL"""
         url = self.url_input.text().strip()
@@ -336,6 +398,7 @@ class TableParserUI(QMainWindow):
         df = self.model.get_table_preview(table_id, max_rows=100)
         
         if df is not None:
+            self.current_table_id = table_id
             self.preview_widget.display_dataframe(df)
             self.table_list_widget.download_button.setEnabled(True)
             self.table_list_widget.download_button.setProperty("table_id", table_id)
@@ -385,6 +448,39 @@ class TableParserUI(QMainWindow):
                 QMessageBox.information(self, "Success", message)
             else:
                 self.show_error(message)
+    
+    def update_table_colors(self):
+        """Update table colors based on column similarity for all tables, using best-matching header row if found. Table color is based on target column match score."""
+        # Get target columns from input
+        target_columns = [col.strip() for col in self.similarity_input.text().split(',') if col.strip()]
+        if not target_columns:
+            return
+        # Get all tables
+        tables = self.model.get_tables()
+        if not tables:
+            return
+        for table in tables:
+            table_id = table["id"]
+            df = self.model.get_table_preview(table_id)
+            if df is not None:
+                # Use best-matching header row for similarity
+                best_header, best_scores, best_row = self.model.best_header_similarity(df, target_columns)
+                # If this is the currently selected table, update the preview
+                if table_id == self.current_table_id:
+                    self.preview_widget.display_dataframe_with_similarity(df, best_scores, header_labels=best_header, header_row_index=best_row)
+                # Update the table list item with similarity information (now using target_column_match_score)
+                items = self.table_list_widget.tables_list.findItems(table["name"], Qt.MatchFlag.MatchContains)
+                if items:
+                    item = items[0]
+                    match_score = self.model.target_column_match_score(df, target_columns)
+                    if match_score < 0.3:
+                        similarity_indicator = "🔴"
+                    elif match_score < 0.7:
+                        similarity_indicator = "🟡"
+                    else:
+                        similarity_indicator = "🟢"
+                    display_text = f"{item.text().split(' ', 2)[0]} {similarity_indicator} {table['name']} (target sim: {match_score:.2f})"
+                    item.setText(display_text)
     
     def show_error(self, message):
         """Show error message"""

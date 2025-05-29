@@ -9,6 +9,7 @@ from parser import get_tables
 import sys
 import numpy as np
 from scipy.stats import entropy
+from difflib import SequenceMatcher
 
 class TableParserModel:
     def __init__(self):
@@ -197,4 +198,56 @@ class TableParserModel:
                     "rows": df.shape[0],
                     "cols": df.shape[1]
                 })
-        return scores 
+        return scores
+
+    def calculate_column_similarity(self, column_names, target_columns):
+        """Calculate similarity scores between column names and target columns using token-based and substring matching, with stricter substring rules."""
+        def token_set_ratio(a, b):
+            set_a = set(str(a).lower().split())
+            set_b = set(str(b).lower().split())
+            intersection = set_a & set_b
+            union = set_a | set_b
+            if not union:
+                return 0.0
+            return len(intersection) / len(union)
+
+        def best_similarity(col, targets):
+            col = str(col).lower().strip()
+            for target in targets:
+                target = str(target).lower().strip()
+                # Only allow substring match if both are at least 3 characters
+                if len(col) >= 3 and len(target) >= 3 and (col in target or target in col):
+                    return 1.0
+            # Otherwise, use token set ratio
+            return max(token_set_ratio(col, target) for target in targets)
+
+        scores = [best_similarity(col, target_columns) for col in column_names]
+        return scores
+
+    def best_header_similarity(self, df, target_columns, max_header_rows=3):
+        """Scan first N rows for possible headers and return the row/columns with the best similarity."""
+        best_scores = self.calculate_column_similarity(df.columns, target_columns)
+        best_row = None
+        best_avg = sum(best_scores) / len(best_scores) if best_scores else 0
+        best_header = list(df.columns)
+        # Scan first N rows
+        for i in range(min(max_header_rows, len(df))):
+            row = list(df.iloc[i])
+            scores = self.calculate_column_similarity(row, target_columns)
+            avg = sum(scores) / len(scores) if scores else 0
+            if avg > best_avg:
+                best_avg = avg
+                best_scores = scores
+                best_row = i
+                best_header = row
+        return best_header, best_scores, best_row 
+
+    def target_column_match_score(self, df, target_columns, max_header_rows=3):
+        """For each target column, find the best-matching column/header in the table. Return the average of these best matches."""
+        best_header, _, _ = self.best_header_similarity(df, target_columns, max_header_rows)
+        def best_match_for_target(target):
+            return max(self.calculate_column_similarity(best_header, [target]))
+        if not target_columns:
+            return 0.0
+        scores = [best_match_for_target(target) for target in target_columns]
+        return sum(scores) / len(scores) if scores else 0.0 
