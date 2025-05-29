@@ -199,6 +199,7 @@ class TableParserUI(QMainWindow):
     def update_tables_list(self):
         """Update the tables list widget"""
         tables = self.model.get_tables()
+        scores = self.model.get_table_scores()
         self.tables_list.clear()
         
         type_icons = {
@@ -207,10 +208,23 @@ class TableParserUI(QMainWindow):
             "div": "🟠"        # Div-based Tables
         }
         
+        # Create a mapping of table IDs to their entropy scores
+        score_map = {score["id"]: score["entropy"] for score in scores}
+        
         for table in tables:
             table_type = table.get("type", "unknown")
             icon = type_icons.get(table_type, "⚪")
-            display_text = f"{icon} {table['name']}"
+            entropy_score = score_map.get(table["id"], 0)
+            
+            # Create a colored indicator based on entropy
+            if entropy_score < 0.3:
+                entropy_indicator = "🔴"  # Red for low entropy
+            elif entropy_score < 0.7:
+                entropy_indicator = "🟡"  # Yellow for medium entropy
+            else:
+                entropy_indicator = "🟢"  # Green for high entropy
+                
+            display_text = f"{icon} {entropy_indicator} {table['name']}"
             
             item = QListWidgetItem(display_text)
             item.setData(Qt.ItemDataRole.UserRole, table["id"])
