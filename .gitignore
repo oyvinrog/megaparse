@@ -8,3 +8,4 @@ __pycache__/
 .url_history
 scores.log
 parse_site.py
+.config

@@ -6,14 +6,17 @@ import json
 from urllib.parse import urlparse
 from bs4 import BeautifulSoup
 from parser import get_tables
+import sys
+import numpy as np
+from scipy.stats import entropy
 
 class TableParserModel:
     def __init__(self):
-        self.url = ""
+        self.url = None
+        self.html_content = None
         self.tables = []
         self.table_dataframes = {}
-        self.html_content = ""
-        self.config_file = os.path.join(os.path.expanduser("~"), ".megaparse_config.json")
+        self.config_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".config")
     
     def load_url(self, url, extraction_config=None):
         """Load a URL and parse tables"""
@@ -149,4 +152,49 @@ class TableParserModel:
                 
             return True, f"Table saved to {filename}"
         except Exception as e:
-            return False, f"Error saving table: {str(e)}" 
+            return False, f"Error saving table: {str(e)}"
+
+    def calculate_table_entropy(self, df):
+        """Calculate entropy score for a table based on column data distribution."""
+        scores = []
+        for col in df.columns:
+            try:
+                # Handle multi-dimensional data by converting to string representation
+                if isinstance(df[col].iloc[0], (list, dict, tuple)):
+                    # Convert complex objects to string representation
+                    value_counts = df[col].apply(str).value_counts()
+                else:
+                    # For regular data, convert to string and count frequencies
+                    value_counts = df[col].fillna('').astype(str).value_counts()
+                
+                # Calculate entropy only if we have more than one unique value
+                if len(value_counts) > 1:
+                    e = entropy(value_counts)
+                    # Normalize entropy to 0-1 range
+                    max_entropy = np.log(len(value_counts))
+                    normalized_entropy = e / max_entropy if max_entropy > 0 else 0
+                    scores.append(normalized_entropy)
+            except Exception as e:
+                # Skip columns that cause errors in entropy calculation
+                logging.warning(f"Could not calculate entropy for column {col}: {str(e)}")
+                continue
+        
+        # Return average entropy across columns, or 0 if no valid scores
+        return np.mean(scores) if scores else 0
+
+    def get_table_scores(self):
+        """Get entropy scores for all tables."""
+        scores = []
+        for table in self.tables:
+            table_id = table["id"]
+            if table_id in self.table_dataframes:
+                df = self.table_dataframes[table_id]
+                entropy_score = self.calculate_table_entropy(df)
+                scores.append({
+                    "id": table_id,
+                    "name": table["name"],
+                    "entropy": entropy_score,
+                    "rows": df.shape[0],
+                    "cols": df.shape[1]
+                })
+        return scores 
