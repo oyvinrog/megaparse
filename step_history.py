@@ -14,6 +14,8 @@ class OperationType(Enum):
     SAVE = "save"
     CLEAR = "clear"
     ERROR = "error"
+    PROJECT_SAVE = "project_save"
+    PROJECT_LOAD = "project_load"
 
 @dataclass
 class Step:

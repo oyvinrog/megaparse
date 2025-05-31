@@ -307,3 +307,72 @@ class TableParserModel:
                 )
                 return True
         return False 
+
+    def save_project(self, filename):
+        """Save current project state to file"""
+        try:
+            # Create project data structure
+            project_data = {
+                "url": self.url,
+                "html_content": self.html_content,
+                "tables": self.tables,
+                "table_dataframes": {
+                    str(k): v.to_dict() for k, v in self.table_dataframes.items()
+                },
+                "steps": [step.to_dict() for step in self.steps.get_steps()]
+            }
+            
+            # Save to file
+            with open(filename, 'w') as f:
+                json.dump(project_data, f)
+            
+            self.add_step(
+                OperationType.PROJECT_SAVE,
+                f"Saved project to {filename}",
+                metadata={"filename": filename}
+            )
+            return True, f"Project saved to {filename}"
+        except Exception as e:
+            error_msg = f"Error saving project: {str(e)}"
+            self.add_step(OperationType.ERROR, error_msg)
+            return False, error_msg
+
+    def load_project(self, filename):
+        """Load project state from file"""
+        try:
+            # Load project data
+            with open(filename, 'r') as f:
+                project_data = json.load(f)
+            
+            # Clear current state
+            self.clear_steps()
+            self.tables = []
+            self.table_dataframes = {}
+            
+            # Restore state
+            self.url = project_data["url"]
+            self.html_content = project_data["html_content"]
+            self.tables = project_data["tables"]
+            
+            # Convert table dataframes back to pandas DataFrames
+            for k, v in project_data["table_dataframes"].items():
+                self.table_dataframes[int(k)] = pd.DataFrame.from_dict(v)
+            
+            # Restore steps
+            for step_data in project_data["steps"]:
+                self.steps.add_step(
+                    OperationType(step_data["operation"]),
+                    step_data["details"],
+                    step_data.get("metadata")
+                )
+            
+            self.add_step(
+                OperationType.PROJECT_LOAD,
+                f"Loaded project from {filename}",
+                metadata={"filename": filename}
+            )
+            return True, f"Project loaded from {filename}"
+        except Exception as e:
+            error_msg = f"Error loading project: {str(e)}"
+            self.add_step(OperationType.ERROR, error_msg)
+            return False, error_msg 

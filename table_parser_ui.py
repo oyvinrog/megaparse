@@ -391,6 +391,15 @@ class TableParserUI(QMainWindow):
         self.fetch_button.clicked.connect(self.fetch_tables)
         url_layout.addWidget(self.fetch_button)
         
+        # Project buttons
+        self.save_project_button = QPushButton("Save Project")
+        self.save_project_button.clicked.connect(self.save_project)
+        url_layout.addWidget(self.save_project_button)
+        
+        self.load_project_button = QPushButton("Load Project")
+        self.load_project_button.clicked.connect(self.load_project)
+        url_layout.addWidget(self.load_project_button)
+        
         main_layout.addLayout(url_layout)
         
         # Table type selection
@@ -670,4 +679,37 @@ class TableParserUI(QMainWindow):
     
     def show_error(self, message):
         """Show error message"""
-        QMessageBox.critical(self, "Error", message) 
+        QMessageBox.critical(self, "Error", message)
+    
+    def save_project(self):
+        """Save current project state"""
+        filename, _ = QFileDialog.getSaveFileName(
+            self, "Save Project", "", "Project Files (*.json)"
+        )
+        
+        if filename:
+            # Ensure it has the correct extension
+            if not filename.lower().endswith('.json'):
+                filename += '.json'
+                
+            success, message = self.model.save_project(filename)
+            if success:
+                self.statusBar().showMessage(message)
+                QMessageBox.information(self, "Success", message)
+            else:
+                self.show_error(message)
+    
+    def load_project(self):
+        """Load project state"""
+        filename, _ = QFileDialog.getOpenFileName(
+            self, "Load Project", "", "Project Files (*.json)"
+        )
+        
+        if filename:
+            success, message = self.model.load_project(filename)
+            if success:
+                self.update_ui()
+                self.statusBar().showMessage(message)
+                QMessageBox.information(self, "Success", message)
+            else:
+                self.show_error(message) 
