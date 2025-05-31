@@ -24,6 +24,7 @@ class TableParserModel:
         self.clear_steps()  # Ensure we start with empty steps
         self.recent_projects_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "recent_projects.json")
         self.max_recent_projects = 10
+        self.current_project_file = None  # Track current project file path
     
     def add_step(self, operation: OperationType, details: str, metadata: dict = None):
         """Add a step to the operations history"""
@@ -374,6 +375,9 @@ class TableParserModel:
             with open(filename, 'w') as f:
                 json.dump(project_data, f)
             
+            # Update current project file
+            self.current_project_file = filename
+            
             # Add to recent projects
             self.add_recent_project(filename)
             
@@ -404,6 +408,7 @@ class TableParserModel:
             self.url = project_data["url"]
             self.html_content = project_data["html_content"]
             self.tables = project_data["tables"]
+            self.current_project_file = filename  # Set current project file
             
             # Convert table dataframes back to pandas DataFrames
             for k, v in project_data["table_dataframes"].items():

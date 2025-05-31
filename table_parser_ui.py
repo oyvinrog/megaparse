@@ -1044,6 +1044,17 @@ class TableParserUI(QMainWindow):
     
     def save_project(self):
         """Save current project state"""
+        # If we have a current project file, use it
+        if self.model.current_project_file:
+            success, message = self.model.save_project(self.model.current_project_file)
+            if success:
+                self.statusBar().showMessage(message)
+                QMessageBox.information(self, "Success", message)
+            else:
+                self.show_error(message)
+            return
+            
+        # Otherwise, prompt for a new file location
         filename, _ = QFileDialog.getSaveFileName(
             self, "Save Project", "", "Project Files (*.json)"
         )
