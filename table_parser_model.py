@@ -10,6 +10,7 @@ import sys
 import numpy as np
 from scipy.stats import entropy
 from difflib import SequenceMatcher
+from step_history import StepHistory, OperationType
 
 class TableParserModel:
     def __init__(self):
@@ -18,12 +19,30 @@ class TableParserModel:
         self.tables = []
         self.table_dataframes = {}
         self.config_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".config")
+        # Initialize with empty step history for new session
+        self.steps = StepHistory(os.path.join(os.path.dirname(os.path.abspath(__file__)), "steps.json"))
+        self.clear_steps()  # Ensure we start with empty steps
+        self.recent_projects_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "recent_projects.json")
+        self.max_recent_projects = 10
+    
+    def add_step(self, operation: OperationType, details: str, metadata: dict = None):
+        """Add a step to the operations history"""
+        self.steps.add_step(operation, details, metadata)
+    
+    def get_steps(self):
+        """Get the list of operations performed"""
+        return self.steps.get_steps()
+    
+    def clear_steps(self):
+        """Clear the operations history"""
+        self.steps.clear_steps()
     
     def load_url(self, url, extraction_config=None):
         """Load a URL and parse tables"""
         self.url = url
         self.tables = []
         self.table_dataframes = {}
+        self.clear_steps()  # Clear previous steps when loading new URL
         
         try:
             headers = {
@@ -33,6 +52,7 @@ class TableParserModel:
             response.raise_for_status()
             
             self.html_content = response.text
+            self.add_step(OperationType.FETCH, f"Fetched content from {url}")
             
             # Use the parser.py functions to extract tables
             self._parse_tables()
@@ -42,8 +62,10 @@ class TableParserModel:
             
             return True, f"Found {len(self.tables)} tables"
         except requests.exceptions.RequestException as e:
+            self.add_step(OperationType.ERROR, f"Error fetching URL: {str(e)}")
             return False, f"Error fetching URL: {str(e)}"
         except Exception as e:
+            self.add_step(OperationType.ERROR, f"Error parsing tables: {str(e)}")
             return False, f"Error parsing tables: {str(e)}"
     
     def save_last_url(self, url):
@@ -115,8 +137,15 @@ class TableParserModel:
                 
                 self.tables.append({"id": table_id, "name": name, "type": table_type})
                 self.table_dataframes[table_id] = df
+                
+                self.add_step(
+                    OperationType.PARSE,
+                    f"Parsed table: {name}",
+                    metadata={"table_id": table_id, "rows": df.shape[0], "cols": df.shape[1]}
+                )
         except Exception as e:
             logging.error(f"Error parsing tables: {str(e)}")
+            self.add_step(OperationType.ERROR, f"Error parsing tables: {str(e)}")
     
     def get_tables(self):
         """Return list of available tables"""
@@ -253,9 +282,217 @@ class TableParserModel:
         return sum(scores) / len(scores) if scores else 0.0
 
     def remove_table(self, table_id):
-        """Remove a table from the model."""
-        # Remove from tables list
-        self.tables = [table for table in self.tables if table["id"] != table_id]
-        # Remove from dataframes dict
+        """Remove a table from the list"""
         if table_id in self.table_dataframes:
-            del self.table_dataframes[table_id] 
+            table_name = next((t["name"] for t in self.tables if t["id"] == table_id), None)
+            del self.table_dataframes[table_id]
+            self.tables = [t for t in self.tables if t["id"] != table_id]
+            if table_name:
+                self.add_step(
+                    OperationType.DELETE,
+                    f"Deleted table: {table_name}",
+                    metadata={"table_id": table_id}
+                )
+            return True
+        return False
+
+    def rename_table(self, table_id, new_name):
+        """Rename a table"""
+        for table in self.tables:
+            if table["id"] == table_id:
+                old_name = table["name"]
+                table["name"] = new_name
+                self.add_step(
+                    OperationType.RENAME,
+                    f"Renamed table from '{old_name}' to '{new_name}'",
+                    metadata={"table_id": table_id, "old_name": old_name, "new_name": new_name}
+                )
+                return True
+        return False 
+
+    def get_recent_projects(self):
+        """Get list of recent projects"""
+        if not os.path.exists(self.recent_projects_file):
+            return []
+            
+        try:
+            with open(self.recent_projects_file, 'r') as f:
+                projects = json.load(f)
+                return projects[:self.max_recent_projects]
+        except Exception as e:
+            logging.error(f"Error loading recent projects: {str(e)}")
+            return []
+    
+    def add_recent_project(self, project_path):
+        """Add a project to recent projects list"""
+        try:
+            # Get current list
+            projects = self.get_recent_projects()
+            
+            # Convert project_path to absolute path
+            project_path = os.path.abspath(project_path)
+            
+            # Remove if already exists
+            if project_path in projects:
+                projects.remove(project_path)
+            
+            # Add to beginning of list
+            projects.insert(0, project_path)
+            
+            # Trim to max size
+            projects = projects[:self.max_recent_projects]
+            
+            # Create directory if it doesn't exist
+            os.makedirs(os.path.dirname(self.recent_projects_file), exist_ok=True)
+            
+            # Save updated list
+            with open(self.recent_projects_file, 'w') as f:
+                json.dump(projects, f)
+                
+        except Exception as e:
+            logging.error(f"Error updating recent projects: {str(e)}")
+    
+    def save_project(self, filename):
+        """Save project state to file"""
+        try:
+            # Save project data
+            project_data = {
+                "url": self.url,
+                "html_content": self.html_content,
+                "tables": self.tables,
+                "table_dataframes": {k: v.to_dict() for k, v in self.table_dataframes.items()},
+                "steps": [step.to_dict() for step in self.steps.get_steps()]
+            }
+            
+            with open(filename, 'w') as f:
+                json.dump(project_data, f)
+            
+            # Add to recent projects
+            self.add_recent_project(filename)
+            
+            self.add_step(
+                OperationType.PROJECT_SAVE,
+                f"Saved project to {filename}",
+                metadata={"filename": filename}
+            )
+            return True, f"Project saved to {filename}"
+        except Exception as e:
+            error_msg = f"Error saving project: {str(e)}"
+            self.add_step(OperationType.ERROR, error_msg)
+            return False, error_msg
+
+    def load_project(self, filename):
+        """Load project state from file"""
+        try:
+            # Load project data
+            with open(filename, 'r') as f:
+                project_data = json.load(f)
+            
+            # Clear current state
+            self.clear_steps()
+            self.tables = []
+            self.table_dataframes = {}
+            
+            # Restore state
+            self.url = project_data["url"]
+            self.html_content = project_data["html_content"]
+            self.tables = project_data["tables"]
+            
+            # Convert table dataframes back to pandas DataFrames
+            for k, v in project_data["table_dataframes"].items():
+                self.table_dataframes[int(k)] = pd.DataFrame.from_dict(v)
+            
+            # Restore steps
+            for step_data in project_data["steps"]:
+                self.steps.add_step(
+                    OperationType(step_data["operation"]),
+                    step_data["details"],
+                    step_data.get("metadata")
+                )
+            
+            self.add_step(
+                OperationType.PROJECT_LOAD,
+                f"Loaded project from {filename}",
+                metadata={"filename": filename}
+            )
+            return True, f"Project loaded from {filename}"
+        except Exception as e:
+            error_msg = f"Error loading project: {str(e)}"
+            self.add_step(OperationType.ERROR, error_msg)
+            return False, error_msg
+
+    def reload(self):
+        """Reload the current URL data"""
+        if not self.url:
+            return False, "No URL to reload"
+            
+        try:
+            # Store current tables and steps for comparison
+            old_tables = self.tables.copy()
+            old_table_names = {table["id"]: table["name"] for table in old_tables}
+            
+            # Store removal steps before clearing
+            removal_steps = [step for step in self.steps.get_steps() if step.operation == OperationType.DELETE]
+            
+            # Clear only tables and dataframes, not steps
+            self.tables = []
+            self.table_dataframes = {}
+            
+            # Reload URL
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+            }
+            response = requests.get(self.url, headers=headers)
+            response.raise_for_status()
+            
+            self.html_content = response.text
+            self.add_step(OperationType.FETCH, f"Reloaded content from {self.url}")
+            
+            # Parse tables using the same configuration as original load
+            self._parse_tables()
+            
+            # Compare with old tables and add appropriate steps
+            new_table_ids = {table["id"] for table in self.tables}
+            old_table_ids = {table["id"] for table in old_tables}
+            
+            # Add steps for removed tables
+            for table in old_tables:
+                if table["id"] not in new_table_ids:
+                    self.add_step(
+                        OperationType.DELETE,
+                        f"Table removed during reload: {table['name']}",
+                        metadata={"table_id": table["id"]}
+                    )
+            
+            # Add steps for new tables and handle renamed tables
+            for table in self.tables:
+                if table["id"] not in old_table_ids:
+                    self.add_step(
+                        OperationType.PARSE,
+                        f"New table found during reload: {table['name']}",
+                        metadata={"table_id": table["id"]}
+                    )
+                elif table["id"] in old_table_names and table["name"] != old_table_names[table["id"]]:
+                    # If the table exists but has a different name, preserve the renamed name
+                    old_name = old_table_names[table["id"]]
+                    table["name"] = old_name
+                    self.add_step(
+                        OperationType.RENAME,
+                        f"Preserved renamed table: {old_name}",
+                        metadata={"table_id": table["id"], "old_name": table["name"], "new_name": old_name}
+                    )
+            
+            # Re-apply removal steps
+            for step in removal_steps:
+                if step.metadata and "table_id" in step.metadata:
+                    table_id = step.metadata["table_id"]
+                    if table_id in new_table_ids:
+                        self.remove_table(table_id)
+            
+            return True, f"Reloaded {len(self.tables)} tables"
+        except requests.exceptions.RequestException as e:
+            self.add_step(OperationType.ERROR, f"Error reloading URL: {str(e)}")
+            return False, f"Error reloading URL: {str(e)}"
+        except Exception as e:
+            self.add_step(OperationType.ERROR, f"Error parsing tables: {str(e)}")
+            return False, f"Error parsing tables: {str(e)}" 
