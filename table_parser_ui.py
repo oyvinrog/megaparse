@@ -2,7 +2,7 @@ from PyQt6.QtWidgets import (
     QMainWindow, QVBoxLayout, QHBoxLayout, QWidget, QPushButton,
     QLineEdit, QLabel, QListWidget, QListWidgetItem, QMessageBox,
     QTableWidget, QTableWidgetItem, QSplitter, QFileDialog,
-    QComboBox, QCheckBox, QGroupBox, QTextBrowser, QProgressBar
+    QComboBox, QCheckBox, QGroupBox, QTextBrowser, QProgressBar, QMenu
 )
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QPainter, QColor, QPen
@@ -53,6 +53,13 @@ class TableListWidget(QWidget):
         layout.addWidget(QLabel("Available Tables:"))
         
         self.tables_list = QListWidget()
+        # Enable multi-select mode
+        self.tables_list.setSelectionMode(QListWidget.SelectionMode.ExtendedSelection)
+        # Enable context menu
+        self.tables_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.tables_list.customContextMenuRequested.connect(self.show_context_menu)
+        # Enable key press events
+        self.tables_list.keyPressEvent = self.handle_key_press
         layout.addWidget(self.tables_list)
         
         # Table info section
@@ -61,8 +68,16 @@ class TableListWidget(QWidget):
         layout.addWidget(QLabel("Table Information:"))
         layout.addWidget(self.table_info)
         
-        # Download button
+        # Button layout
         button_layout = QHBoxLayout()
+        
+        # Delete button
+        self.delete_button = QPushButton("Delete Selected")
+        self.delete_button.setEnabled(False)
+        self.delete_button.clicked.connect(self.delete_selected_tables)
+        button_layout.addWidget(self.delete_button)
+        
+        # Download button
         self.download_button = QPushButton("Save Selected Table")
         self.download_button.setEnabled(False)
         button_layout.addWidget(self.download_button)
@@ -76,6 +91,49 @@ class TableListWidget(QWidget):
         button_layout.addLayout(format_layout)
         
         layout.addLayout(button_layout)
+        
+        # Connect selection changed signal
+        self.tables_list.itemSelectionChanged.connect(self.on_selection_changed)
+    
+    def show_context_menu(self, position):
+        """Show context menu for table list"""
+        menu = QMenu()
+        delete_action = menu.addAction("Delete Selected")
+        delete_action.triggered.connect(self.delete_selected_tables)
+        menu.exec(self.tables_list.mapToGlobal(position))
+    
+    def delete_selected_tables(self):
+        """Delete selected tables"""
+        selected_items = self.tables_list.selectedItems()
+        if not selected_items:
+            return
+            
+        # Get parent window to access model
+        parent = self.window()
+        if not isinstance(parent, TableParserUI):
+            return
+            
+        # Delete tables
+        count = len(selected_items)
+        for item in selected_items:
+            table_id = item.data(Qt.ItemDataRole.UserRole)
+            parent.model.remove_table(table_id)
+        
+        # Update UI
+        parent.update_ui()
+        parent.statusBar().showMessage(f"Deleted {count} table{'s' if count > 1 else ''}")
+        
+        # Clear preview if current table was deleted
+        if parent.current_table_id not in [table["id"] for table in parent.model.get_tables()]:
+            parent.preview_widget.table_preview.clear()
+            self.table_info.clear()
+            parent.current_table_id = None
+    
+    def on_selection_changed(self):
+        """Handle selection changes"""
+        selected_items = self.tables_list.selectedItems()
+        self.delete_button.setEnabled(len(selected_items) > 0)
+        self.download_button.setEnabled(len(selected_items) == 1)
     
     def update_tables_list(self, tables, scores):
         self.tables_list.clear()
@@ -129,6 +187,14 @@ class TableListWidget(QWidget):
             self.table_info.setHtml(info_html)
         else:
             self.table_info.clear()
+    
+    def handle_key_press(self, event):
+        """Handle key press events"""
+        if event.key() == Qt.Key.Key_Delete:
+            self.delete_selected_tables()
+        else:
+            # Call the original keyPressEvent for other keys
+            QListWidget.keyPressEvent(self.tables_list, event)
 
 class TablePreviewWidget(QWidget):
     def __init__(self, parent=None):
