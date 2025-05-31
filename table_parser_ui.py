@@ -97,6 +97,11 @@ class TableListWidget(QWidget):
         self.delete_button.clicked.connect(self.delete_selected_tables)
         button_layout.addWidget(self.delete_button)
         
+        # Add SQLite button
+        self.sqlite_button = QPushButton("Open in SQLite")
+        self.sqlite_button.setMinimumHeight(35)
+        button_layout.addWidget(self.sqlite_button)
+        
         # Remove others button
         self.remove_others_button = QPushButton("Remove Other Tables")
         self.remove_others_button.setEnabled(False)
@@ -515,6 +520,7 @@ class TableParserUI(QMainWindow):
         self.table_list_widget.tables_list.itemClicked.connect(self.on_table_selected)
         self.table_list_widget.tables_list.currentItemChanged.connect(self.on_table_selected)
         self.table_list_widget.download_button.clicked.connect(self.save_table)
+        self.table_list_widget.sqlite_button.clicked.connect(self.open_in_sqlite)
 
     def setup_style(self):
         """Setup modern dark theme and styling"""
@@ -1182,4 +1188,12 @@ class TableParserUI(QMainWindow):
             self.statusBar().showMessage(message)
         else:
             self.show_error(message)
-            self.statusBar().showMessage("Error: " + message) 
+            self.statusBar().showMessage("Error: " + message)
+
+    def open_in_sqlite(self):
+        """Open all tables in SQLite shell"""
+        success, message = self.model.open_in_sqlshell()
+        if success:
+            self.statusBar().showMessage(message)
+        else:
+            self.show_error(message) 

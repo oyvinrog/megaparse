@@ -11,6 +11,10 @@ import numpy as np
 from scipy.stats import entropy
 from difflib import SequenceMatcher
 from step_history import StepHistory, OperationType
+import sqlite3
+import sqlshell
+import subprocess
+import shutil
 
 class TableParserModel:
     def __init__(self):
@@ -184,6 +188,43 @@ class TableParserModel:
             return True, f"Table saved to {filename}"
         except Exception as e:
             return False, f"Error saving table: {str(e)}"
+
+    def open_in_sqlshell(self):
+        """Dump all dataframes to a SQLite database and open it with sqlshell"""
+        if not self.table_dataframes:
+            return False, "No tables to export"
+        
+        try:
+            # Create a temporary database file
+            db_file = "tables.db"
+            
+            # Connect to SQLite database
+            conn = sqlite3.connect(db_file)
+            
+            # Export each dataframe to a table in the database
+            for table_id, df in self.table_dataframes.items():
+                table_name = f"table_{table_id}"
+                df.to_sql(table_name, conn, if_exists='replace', index=False)
+            
+            # Close the connection
+            conn.close()
+            
+            # Try to launch in a new terminal window
+            terminal = shutil.which('gnome-terminal') or shutil.which('x-terminal-emulator') or shutil.which('xterm')
+            if terminal:
+                subprocess.Popen([terminal, '--', sys.executable, 'run_sqlshell.py', db_file])
+            else:
+                subprocess.Popen([sys.executable, 'run_sqlshell.py', db_file])
+            
+            self.add_step(
+                OperationType.SAVE,
+                f"Exported {len(self.table_dataframes)} tables to SQLite database",
+                metadata={"db_file": db_file}
+            )
+            
+            return True, f"Opened {len(self.table_dataframes)} tables in SQLite database"
+        except Exception as e:
+            return False, f"Error exporting to SQLite: {str(e)}"
 
     def calculate_table_entropy(self, df):
         """Calculate entropy score for a table based on column data distribution."""
