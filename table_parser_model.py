@@ -419,4 +419,80 @@ class TableParserModel:
         except Exception as e:
             error_msg = f"Error loading project: {str(e)}"
             self.add_step(OperationType.ERROR, error_msg)
-            return False, error_msg 
+            return False, error_msg
+
+    def reload(self):
+        """Reload the current URL data"""
+        if not self.url:
+            return False, "No URL to reload"
+            
+        try:
+            # Store current tables and steps for comparison
+            old_tables = self.tables.copy()
+            old_table_names = {table["id"]: table["name"] for table in old_tables}
+            
+            # Store removal steps before clearing
+            removal_steps = [step for step in self.steps.get_steps() if step.operation == OperationType.DELETE]
+            
+            # Clear only tables and dataframes, not steps
+            self.tables = []
+            self.table_dataframes = {}
+            
+            # Reload URL
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+            }
+            response = requests.get(self.url, headers=headers)
+            response.raise_for_status()
+            
+            self.html_content = response.text
+            self.add_step(OperationType.FETCH, f"Reloaded content from {self.url}")
+            
+            # Parse tables using the same configuration as original load
+            self._parse_tables()
+            
+            # Compare with old tables and add appropriate steps
+            new_table_ids = {table["id"] for table in self.tables}
+            old_table_ids = {table["id"] for table in old_tables}
+            
+            # Add steps for removed tables
+            for table in old_tables:
+                if table["id"] not in new_table_ids:
+                    self.add_step(
+                        OperationType.DELETE,
+                        f"Table removed during reload: {table['name']}",
+                        metadata={"table_id": table["id"]}
+                    )
+            
+            # Add steps for new tables and handle renamed tables
+            for table in self.tables:
+                if table["id"] not in old_table_ids:
+                    self.add_step(
+                        OperationType.PARSE,
+                        f"New table found during reload: {table['name']}",
+                        metadata={"table_id": table["id"]}
+                    )
+                elif table["id"] in old_table_names and table["name"] != old_table_names[table["id"]]:
+                    # If the table exists but has a different name, preserve the renamed name
+                    old_name = old_table_names[table["id"]]
+                    table["name"] = old_name
+                    self.add_step(
+                        OperationType.RENAME,
+                        f"Preserved renamed table: {old_name}",
+                        metadata={"table_id": table["id"], "old_name": table["name"], "new_name": old_name}
+                    )
+            
+            # Re-apply removal steps
+            for step in removal_steps:
+                if step.metadata and "table_id" in step.metadata:
+                    table_id = step.metadata["table_id"]
+                    if table_id in new_table_ids:
+                        self.remove_table(table_id)
+            
+            return True, f"Reloaded {len(self.tables)} tables"
+        except requests.exceptions.RequestException as e:
+            self.add_step(OperationType.ERROR, f"Error reloading URL: {str(e)}")
+            return False, f"Error reloading URL: {str(e)}"
+        except Exception as e:
+            self.add_step(OperationType.ERROR, f"Error parsing tables: {str(e)}")
+            return False, f"Error parsing tables: {str(e)}" 

@@ -103,6 +103,12 @@ class TableListWidget(QWidget):
         self.download_button.setMinimumHeight(35)
         button_layout.addWidget(self.download_button)
         
+        # Reload button
+        self.reload_button = QPushButton("Reload")
+        self.reload_button.setMinimumHeight(35)
+        self.reload_button.clicked.connect(self.reload_data)
+        button_layout.addWidget(self.reload_button)
+        
         # Format selection with modern styling
         format_layout = QHBoxLayout()
         format_layout.setSpacing(10)
@@ -258,6 +264,27 @@ class TableListWidget(QWidget):
                 parent.statusBar().showMessage(f"Table renamed to: {new_name}")
             else:
                 QMessageBox.warning(self, "Error", "Failed to rename table")
+
+    def reload_data(self):
+        """Reload the current URL data"""
+        if not self.model.url:
+            self.show_error("No URL to reload")
+            return
+            
+        self.statusBar().showMessage("Reloading data...")
+        self.table_list_widget.tables_list.clear()
+        self.preview_widget.table_preview.clear()
+        self.table_list_widget.table_info.clear()
+        self.table_list_widget.download_button.setEnabled(False)
+        
+        success, message = self.model.reload()
+        if success:
+            self.update_ui()
+            self.update_steps_list()
+            self.statusBar().showMessage(message)
+        else:
+            self.show_error(message)
+            self.statusBar().showMessage("Error: " + message)
 
 class TablePreviewWidget(QWidget):
     def __init__(self, parent=None):
@@ -450,10 +477,13 @@ class TableParserUI(QMainWindow):
         self.setup_style()
         self.init_ui()
         
-        # Load previously used URL into the URL textbox
-        last_url = self.model.get_last_url()
-        if last_url:
-            self.url_input.setText(last_url)
+        # Load URL into the URL textbox, prioritizing model's URL over last used URL
+        if self.model.url:
+            self.url_input.setText(self.model.url)
+        else:
+            last_url = self.model.get_last_url()
+            if last_url:
+                self.url_input.setText(last_url)
         
         # Connect table selection signals
         self.table_list_widget.tables_list.itemClicked.connect(self.on_table_selected)
@@ -462,6 +492,9 @@ class TableParserUI(QMainWindow):
 
     def setup_style(self):
         """Setup modern dark theme and styling"""
+        # Set window icon
+        self.setWindowIcon(QIcon.fromTheme("document-open"))
+        
         # Set dark theme colors
         self.setStyleSheet("""
             QMainWindow {
@@ -608,30 +641,34 @@ class TableParserUI(QMainWindow):
         file_menu = self.menubar.addMenu("&File")
         
         # Add menu items with icons
-        new_action = file_menu.addAction("&New Project")
+        new_action = file_menu.addAction(QIcon.fromTheme("document-new"), "&New Project")
         new_action.setShortcut("Ctrl+N")
         new_action.triggered.connect(self.new_project)
         
-        open_action = file_menu.addAction("&Open Project...")
+        open_action = file_menu.addAction(QIcon.fromTheme("document-open"), "&Open Project...")
         open_action.setShortcut("Ctrl+O")
         open_action.triggered.connect(self.load_project)
         
-        save_action = file_menu.addAction("&Save Project")
+        save_action = file_menu.addAction(QIcon.fromTheme("document-save"), "&Save Project")
         save_action.setShortcut("Ctrl+S")
         save_action.triggered.connect(self.save_project)
         
-        save_as_action = file_menu.addAction("Save Project &As...")
+        save_as_action = file_menu.addAction(QIcon.fromTheme("document-save-as"), "Save Project &As...")
         save_as_action.setShortcut("Ctrl+Shift+S")
         save_as_action.triggered.connect(self.save_project_as)
         
+        reload_action = file_menu.addAction(QIcon.fromTheme("view-refresh"), "&Reload All")
+        reload_action.setShortcut("Ctrl+R")
+        reload_action.triggered.connect(self.reload_all)
+        
         file_menu.addSeparator()
         
-        self.recent_menu = file_menu.addMenu("Recent &Projects")
+        self.recent_menu = file_menu.addMenu(QIcon.fromTheme("document-open-recent"), "Recent &Projects")
         self.update_recent_projects()
         
         file_menu.addSeparator()
         
-        exit_action = file_menu.addAction("E&xit")
+        exit_action = file_menu.addAction(QIcon.fromTheme("application-exit"), "E&xit")
         exit_action.setShortcut("Ctrl+Q")
         exit_action.triggered.connect(self.close)
 
@@ -675,6 +712,12 @@ class TableParserUI(QMainWindow):
         self.load_project_button.clicked.connect(self.load_project)
         url_layout.addWidget(self.load_project_button)
         
+        # Add Reload All button
+        self.reload_all_button = QPushButton("Reload All")
+        self.reload_all_button.setMinimumHeight(35)
+        self.reload_all_button.clicked.connect(self.reload_all)
+        url_layout.addWidget(self.reload_all_button)
+        
         main_layout.addLayout(url_layout)
         
         # Table type selection with modern styling
@@ -715,6 +758,7 @@ class TableParserUI(QMainWindow):
         self.similarity_input = QLineEdit()
         self.similarity_input.setPlaceholderText("e.g., price, date, name")
         self.similarity_input.setMinimumHeight(35)
+        self.similarity_input.returnPressed.connect(self.update_table_colors)
         similarity_layout.addWidget(self.similarity_input)
         
         self.apply_similarity_button = QPushButton("Apply Similarity")
@@ -1002,6 +1046,7 @@ class TableParserUI(QMainWindow):
                 # Update URL input with loaded project's URL
                 self.url_input.setText(self.model.url)
                 self.update_ui()
+                self.update_steps_list()  # Also update steps list
                 self.statusBar().showMessage(message)
                 # Add to recent projects and update menu
                 self.model.add_recent_project(filename)
@@ -1067,10 +1112,37 @@ class TableParserUI(QMainWindow):
         if os.path.exists(project_path):
             success, message = self.model.load_project(project_path)
             if success:
+                # Update URL input with loaded project's URL
+                self.url_input.setText(self.model.url)
                 self.update_ui()
+                self.update_steps_list()  # Also update steps list
                 self.statusBar().showMessage(message)
             else:
                 self.show_error(message)
         else:
             self.show_error(f"Project file not found: {project_path}")
-            self.update_recent_projects()  # Refresh the list 
+            self.update_recent_projects()  # Refresh the list
+
+    def reload_all(self):
+        """Reload the entire project"""
+        if not self.model.url:
+            self.show_error("No URL to reload")
+            return
+            
+        self.statusBar().showMessage("Reloading project...")
+        
+        # Clear UI
+        self.table_list_widget.tables_list.clear()
+        self.preview_widget.table_preview.clear()
+        self.table_list_widget.table_info.clear()
+        self.table_list_widget.download_button.setEnabled(False)
+        
+        # Reload using the model's reload method
+        success, message = self.model.reload()
+        if success:
+            self.update_ui()
+            self.update_steps_list()
+            self.statusBar().showMessage(message)
+        else:
+            self.show_error(message)
+            self.statusBar().showMessage("Error: " + message) 
