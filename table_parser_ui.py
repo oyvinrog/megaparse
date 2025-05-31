@@ -392,6 +392,10 @@ class TableParserUI(QMainWindow):
         url_layout.addWidget(self.fetch_button)
         
         # Project buttons
+        self.new_project_button = QPushButton("New Project")
+        self.new_project_button.clicked.connect(self.new_project)
+        url_layout.addWidget(self.new_project_button)
+        
         self.save_project_button = QPushButton("Save Project")
         self.save_project_button.clicked.connect(self.save_project)
         url_layout.addWidget(self.save_project_button)
@@ -712,4 +716,23 @@ class TableParserUI(QMainWindow):
                 self.statusBar().showMessage(message)
                 QMessageBox.information(self, "Success", message)
             else:
-                self.show_error(message) 
+                self.show_error(message)
+    
+    def new_project(self):
+        """Create a new project by clearing all tables and steps"""
+        reply = QMessageBox.question(
+            self,
+            "New Project",
+            "Are you sure you want to create a new project? This will clear all current tables and steps.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No
+        )
+        
+        if reply == QMessageBox.StandardButton.Yes:
+            self.model.clear_all()
+            self.url_input.clear()
+            self.table_list_widget.tables_list.clear()
+            self.preview_widget.table_preview.clear()
+            self.table_list_widget.table_info.clear()
+            self.steps_list.clear()
+            self.statusBar().showMessage("New project created") 
