@@ -473,14 +473,13 @@ class TableParserUI(QMainWindow):
         self.update_steps_list()
 
     def update_steps_list(self):
-        """Update the steps list widget with current operations"""
+        """Update the steps list widget with current steps"""
         self.steps_list.clear()
         for step in self.model.get_steps():
-            # Create a more compact display text for the list
-            display_text = f"[{step['timestamp']}] {step['operation']}: {step['details'][:50]}{'...' if len(step['details']) > 50 else ''}"
+            display_text = f"[{step.timestamp}] {step.operation.value}: {step.details[:50]}{'...' if len(step.details) > 50 else ''}"
             item = QListWidgetItem(display_text)
             # Set the full text as tooltip
-            item.setToolTip(f"[{step['timestamp']}] {step['operation']}: {step['details']}")
+            item.setToolTip(f"[{step.timestamp}] {step.operation.value}: {step.details}")
             self.steps_list.addItem(item)
         # Scroll to bottom to show latest steps
         self.steps_list.scrollToBottom()

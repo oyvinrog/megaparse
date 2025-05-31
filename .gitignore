@@ -9,3 +9,4 @@ __pycache__/
 scores.log
 parse_site.py
 .config
+steps.json

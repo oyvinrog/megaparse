@@ -10,6 +10,7 @@ import sys
 import numpy as np
 from scipy.stats import entropy
 from difflib import SequenceMatcher
+from step_history import StepHistory, OperationType
 
 class TableParserModel:
     def __init__(self):
@@ -18,23 +19,21 @@ class TableParserModel:
         self.tables = []
         self.table_dataframes = {}
         self.config_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".config")
-        self.steps = []  # List to track operations performed
+        # Initialize with empty step history for new session
+        self.steps = StepHistory(os.path.join(os.path.dirname(os.path.abspath(__file__)), "steps.json"))
+        self.clear_steps()  # Ensure we start with empty steps
     
-    def add_step(self, operation, details):
+    def add_step(self, operation: OperationType, details: str, metadata: dict = None):
         """Add a step to the operations history"""
-        self.steps.append({
-            "operation": operation,
-            "details": details,
-            "timestamp": pd.Timestamp.now().strftime("%Y-%m-%d %H:%M:%S")
-        })
+        self.steps.add_step(operation, details, metadata)
     
     def get_steps(self):
         """Get the list of operations performed"""
-        return self.steps
+        return self.steps.get_steps()
     
     def clear_steps(self):
         """Clear the operations history"""
-        self.steps = []
+        self.steps.clear_steps()
     
     def load_url(self, url, extraction_config=None):
         """Load a URL and parse tables"""
@@ -51,7 +50,7 @@ class TableParserModel:
             response.raise_for_status()
             
             self.html_content = response.text
-            self.add_step("fetch", f"Fetched content from {url}")
+            self.add_step(OperationType.FETCH, f"Fetched content from {url}")
             
             # Use the parser.py functions to extract tables
             self._parse_tables()
@@ -61,8 +60,10 @@ class TableParserModel:
             
             return True, f"Found {len(self.tables)} tables"
         except requests.exceptions.RequestException as e:
+            self.add_step(OperationType.ERROR, f"Error fetching URL: {str(e)}")
             return False, f"Error fetching URL: {str(e)}"
         except Exception as e:
+            self.add_step(OperationType.ERROR, f"Error parsing tables: {str(e)}")
             return False, f"Error parsing tables: {str(e)}"
     
     def save_last_url(self, url):
@@ -134,8 +135,15 @@ class TableParserModel:
                 
                 self.tables.append({"id": table_id, "name": name, "type": table_type})
                 self.table_dataframes[table_id] = df
+                
+                self.add_step(
+                    OperationType.PARSE,
+                    f"Parsed table: {name}",
+                    metadata={"table_id": table_id, "rows": df.shape[0], "cols": df.shape[1]}
+                )
         except Exception as e:
             logging.error(f"Error parsing tables: {str(e)}")
+            self.add_step(OperationType.ERROR, f"Error parsing tables: {str(e)}")
     
     def get_tables(self):
         """Return list of available tables"""
@@ -278,7 +286,11 @@ class TableParserModel:
             del self.table_dataframes[table_id]
             self.tables = [t for t in self.tables if t["id"] != table_id]
             if table_name:
-                self.add_step("delete", f"Deleted table: {table_name}")
+                self.add_step(
+                    OperationType.DELETE,
+                    f"Deleted table: {table_name}",
+                    metadata={"table_id": table_id}
+                )
             return True
         return False
 
@@ -288,6 +300,10 @@ class TableParserModel:
             if table["id"] == table_id:
                 old_name = table["name"]
                 table["name"] = new_name
-                self.add_step("rename", f"Renamed table from '{old_name}' to '{new_name}'")
+                self.add_step(
+                    OperationType.RENAME,
+                    f"Renamed table from '{old_name}' to '{new_name}'",
+                    metadata={"table_id": table_id, "old_name": old_name, "new_name": new_name}
+                )
                 return True
         return False 
