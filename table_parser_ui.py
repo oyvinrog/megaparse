@@ -430,12 +430,20 @@ class TableParserUI(QMainWindow):
         
         main_layout.addLayout(similarity_layout)
         
-        # Splitter for tables list and preview
+        # Splitter for tables list, preview, and steps
         splitter = QSplitter(Qt.Orientation.Horizontal)
         
         # Initialize components
         self.table_list_widget = TableListWidget()
         self.preview_widget = TablePreviewWidget()
+        
+        # Create steps list widget
+        steps_widget = QWidget()
+        steps_layout = QVBoxLayout(steps_widget)
+        steps_layout.addWidget(QLabel("Operation History:"))
+        self.steps_list = QListWidget()
+        steps_layout.addWidget(self.steps_list)
+        steps_widget.setMaximumWidth(300)
         
         # Connect signals
         self.table_list_widget.tables_list.itemClicked.connect(self.on_table_selected)
@@ -445,7 +453,8 @@ class TableParserUI(QMainWindow):
         # Add widgets to splitter
         splitter.addWidget(self.table_list_widget)
         splitter.addWidget(self.preview_widget)
-        splitter.setSizes([400, 1000])
+        splitter.addWidget(steps_widget)
+        splitter.setSizes([400, 1000, 300])
         
         main_layout.addWidget(splitter)
         
@@ -459,7 +468,23 @@ class TableParserUI(QMainWindow):
         
         # Store current table ID for similarity coloring
         self.current_table_id = None
+        
+        # Update steps list
+        self.update_steps_list()
 
+    def update_steps_list(self):
+        """Update the steps list widget with current operations"""
+        self.steps_list.clear()
+        for step in self.model.get_steps():
+            # Create a more compact display text for the list
+            display_text = f"[{step['timestamp']}] {step['operation']}: {step['details'][:50]}{'...' if len(step['details']) > 50 else ''}"
+            item = QListWidgetItem(display_text)
+            # Set the full text as tooltip
+            item.setToolTip(f"[{step['timestamp']}] {step['operation']}: {step['details']}")
+            self.steps_list.addItem(item)
+        # Scroll to bottom to show latest steps
+        self.steps_list.scrollToBottom()
+    
     def fetch_tables(self):
         """Fetch tables from the URL"""
         url = self.url_input.text().strip()
@@ -483,6 +508,7 @@ class TableParserUI(QMainWindow):
         success, message = self.model.load_url(url, extraction_config)
         if success:
             self.update_ui()
+            self.update_steps_list()  # Update steps list after fetching
             self.statusBar().showMessage(message)
         else:
             self.show_error(message)
@@ -494,6 +520,7 @@ class TableParserUI(QMainWindow):
         scores = self.model.get_table_scores()
         
         self.table_list_widget.update_tables_list(tables, scores)
+        self.update_steps_list()  # Update steps list when UI is updated
     
     def on_table_selected(self, item):
         """Handle table selection"""

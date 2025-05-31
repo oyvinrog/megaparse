@@ -18,12 +18,30 @@ class TableParserModel:
         self.tables = []
         self.table_dataframes = {}
         self.config_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".config")
+        self.steps = []  # List to track operations performed
+    
+    def add_step(self, operation, details):
+        """Add a step to the operations history"""
+        self.steps.append({
+            "operation": operation,
+            "details": details,
+            "timestamp": pd.Timestamp.now().strftime("%Y-%m-%d %H:%M:%S")
+        })
+    
+    def get_steps(self):
+        """Get the list of operations performed"""
+        return self.steps
+    
+    def clear_steps(self):
+        """Clear the operations history"""
+        self.steps = []
     
     def load_url(self, url, extraction_config=None):
         """Load a URL and parse tables"""
         self.url = url
         self.tables = []
         self.table_dataframes = {}
+        self.clear_steps()  # Clear previous steps when loading new URL
         
         try:
             headers = {
@@ -33,6 +51,7 @@ class TableParserModel:
             response.raise_for_status()
             
             self.html_content = response.text
+            self.add_step("fetch", f"Fetched content from {url}")
             
             # Use the parser.py functions to extract tables
             self._parse_tables()
@@ -253,17 +272,22 @@ class TableParserModel:
         return sum(scores) / len(scores) if scores else 0.0
 
     def remove_table(self, table_id):
-        """Remove a table from the model."""
-        # Remove from tables list
-        self.tables = [table for table in self.tables if table["id"] != table_id]
-        # Remove from dataframes dict
+        """Remove a table from the list"""
         if table_id in self.table_dataframes:
+            table_name = next((t["name"] for t in self.tables if t["id"] == table_id), None)
             del self.table_dataframes[table_id]
+            self.tables = [t for t in self.tables if t["id"] != table_id]
+            if table_name:
+                self.add_step("delete", f"Deleted table: {table_name}")
+            return True
+        return False
 
     def rename_table(self, table_id, new_name):
-        """Rename a table in the model."""
+        """Rename a table"""
         for table in self.tables:
             if table["id"] == table_id:
+                old_name = table["name"]
                 table["name"] = new_name
+                self.add_step("rename", f"Renamed table from '{old_name}' to '{new_name}'")
                 return True
         return False 
