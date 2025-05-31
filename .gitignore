@@ -10,3 +10,4 @@ scores.log
 parse_site.py
 .config
 steps.json
+recent_projects.json

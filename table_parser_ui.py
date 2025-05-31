@@ -3,13 +3,14 @@ from PyQt6.QtWidgets import (
     QLineEdit, QLabel, QListWidget, QListWidgetItem, QMessageBox,
     QTableWidget, QTableWidgetItem, QSplitter, QFileDialog,
     QComboBox, QCheckBox, QGroupBox, QTextBrowser, QProgressBar, QMenu,
-    QInputDialog
+    QInputDialog, QMenuBar
 )
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QPainter, QColor, QPen
 import pandas as pd
 import numpy as np
 from scipy.stats import entropy
+import os
 
 class ScoreBar(QWidget):
     def __init__(self, score, parent=None):
@@ -376,6 +377,46 @@ class TableParserUI(QMainWindow):
         self.setWindowTitle("Table Parser")
         self.setGeometry(100, 100, 1200, 800)
         
+        # Create menu bar
+        self.menubar = self.menuBar()
+        self.menubar.setNativeMenuBar(False)  # Ensure menu bar is always visible
+        
+        # File menu
+        file_menu = self.menubar.addMenu("&File")  # Added & for Alt+F shortcut
+        
+        # New Project
+        new_action = file_menu.addAction("&New Project")
+        new_action.triggered.connect(self.new_project)
+        new_action.setShortcut("Ctrl+N")
+        
+        # Open Project
+        open_action = file_menu.addAction("&Open Project...")
+        open_action.triggered.connect(self.load_project)
+        open_action.setShortcut("Ctrl+O")
+        
+        # Save Project
+        save_action = file_menu.addAction("&Save Project")
+        save_action.triggered.connect(self.save_project)
+        save_action.setShortcut("Ctrl+S")
+        
+        # Save Project As
+        save_as_action = file_menu.addAction("Save Project &As...")
+        save_as_action.triggered.connect(self.save_project_as)
+        save_as_action.setShortcut("Ctrl+Shift+S")
+        
+        file_menu.addSeparator()
+        
+        # Recent Projects submenu
+        self.recent_menu = file_menu.addMenu("Recent &Projects")
+        self.update_recent_projects()
+        
+        file_menu.addSeparator()
+        
+        # Exit
+        exit_action = file_menu.addAction("E&xit")
+        exit_action.triggered.connect(self.close)
+        exit_action.setShortcut("Ctrl+Q")
+        
         # Main layout
         main_layout = QVBoxLayout()
         
@@ -712,27 +753,78 @@ class TableParserUI(QMainWindow):
         if filename:
             success, message = self.model.load_project(filename)
             if success:
+                # Update URL input with loaded project's URL
+                self.url_input.setText(self.model.url)
                 self.update_ui()
                 self.statusBar().showMessage(message)
-                QMessageBox.information(self, "Success", message)
+                # Add to recent projects and update menu
+                self.model.add_recent_project(filename)
+                self.update_recent_projects()
             else:
                 self.show_error(message)
     
     def new_project(self):
-        """Create a new project by clearing all tables and steps"""
-        reply = QMessageBox.question(
-            self,
-            "New Project",
-            "Are you sure you want to create a new project? This will clear all current tables and steps.",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No
+        """Create a new project"""
+        # Clear current state
+        self.model.clear_steps()
+        self.model.tables = []
+        self.model.table_dataframes = {}
+        self.model.url = None
+        self.model.html_content = None
+        
+        # Clear UI
+        self.url_input.clear()
+        self.table_list_widget.tables_list.clear()
+        self.preview_widget.table_preview.clear()
+        self.table_list_widget.table_info.clear()
+        self.update_ui()
+        
+        self.statusBar().showMessage("New project created")
+    
+    def save_project_as(self):
+        """Save current project state with a new filename"""
+        filename, _ = QFileDialog.getSaveFileName(
+            self, "Save Project As", "", "Project Files (*.json)"
         )
         
-        if reply == QMessageBox.StandardButton.Yes:
-            self.model.clear_all()
-            self.url_input.clear()
-            self.table_list_widget.tables_list.clear()
-            self.preview_widget.table_preview.clear()
-            self.table_list_widget.table_info.clear()
-            self.steps_list.clear()
-            self.statusBar().showMessage("New project created") 
+        if filename:
+            # Ensure it has the correct extension
+            if not filename.lower().endswith('.json'):
+                filename += '.json'
+                
+            success, message = self.model.save_project(filename)
+            if success:
+                self.statusBar().showMessage(message)
+                QMessageBox.information(self, "Success", message)
+                self.update_recent_projects()  # Update recent projects list
+            else:
+                self.show_error(message)
+    
+    def update_recent_projects(self):
+        """Update the recent projects menu"""
+        self.recent_menu.clear()
+        
+        # Get recent projects from model
+        recent_projects = self.model.get_recent_projects()
+        
+        if not recent_projects:
+            action = self.recent_menu.addAction("No recent projects")
+            action.setEnabled(False)
+            return
+            
+        for project in recent_projects:
+            action = self.recent_menu.addAction(project)
+            action.triggered.connect(lambda checked, p=project: self.load_recent_project(p))
+    
+    def load_recent_project(self, project_path):
+        """Load a project from the recent projects list"""
+        if os.path.exists(project_path):
+            success, message = self.model.load_project(project_path)
+            if success:
+                self.update_ui()
+                self.statusBar().showMessage(message)
+            else:
+                self.show_error(message)
+        else:
+            self.show_error(f"Project file not found: {project_path}")
+            self.update_recent_projects()  # Refresh the list 

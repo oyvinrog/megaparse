@@ -22,6 +22,8 @@ class TableParserModel:
         # Initialize with empty step history for new session
         self.steps = StepHistory(os.path.join(os.path.dirname(os.path.abspath(__file__)), "steps.json"))
         self.clear_steps()  # Ensure we start with empty steps
+        self.recent_projects_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "recent_projects.json")
+        self.max_recent_projects = 10
     
     def add_step(self, operation: OperationType, details: str, metadata: dict = None):
         """Add a step to the operations history"""
@@ -308,23 +310,65 @@ class TableParserModel:
                 return True
         return False 
 
-    def save_project(self, filename):
-        """Save current project state to file"""
+    def get_recent_projects(self):
+        """Get list of recent projects"""
+        if not os.path.exists(self.recent_projects_file):
+            return []
+            
         try:
-            # Create project data structure
+            with open(self.recent_projects_file, 'r') as f:
+                projects = json.load(f)
+                return projects[:self.max_recent_projects]
+        except Exception as e:
+            logging.error(f"Error loading recent projects: {str(e)}")
+            return []
+    
+    def add_recent_project(self, project_path):
+        """Add a project to recent projects list"""
+        try:
+            # Get current list
+            projects = self.get_recent_projects()
+            
+            # Convert project_path to absolute path
+            project_path = os.path.abspath(project_path)
+            
+            # Remove if already exists
+            if project_path in projects:
+                projects.remove(project_path)
+            
+            # Add to beginning of list
+            projects.insert(0, project_path)
+            
+            # Trim to max size
+            projects = projects[:self.max_recent_projects]
+            
+            # Create directory if it doesn't exist
+            os.makedirs(os.path.dirname(self.recent_projects_file), exist_ok=True)
+            
+            # Save updated list
+            with open(self.recent_projects_file, 'w') as f:
+                json.dump(projects, f)
+                
+        except Exception as e:
+            logging.error(f"Error updating recent projects: {str(e)}")
+    
+    def save_project(self, filename):
+        """Save project state to file"""
+        try:
+            # Save project data
             project_data = {
                 "url": self.url,
                 "html_content": self.html_content,
                 "tables": self.tables,
-                "table_dataframes": {
-                    str(k): v.to_dict() for k, v in self.table_dataframes.items()
-                },
+                "table_dataframes": {k: v.to_dict() for k, v in self.table_dataframes.items()},
                 "steps": [step.to_dict() for step in self.steps.get_steps()]
             }
             
-            # Save to file
             with open(filename, 'w') as f:
                 json.dump(project_data, f)
+            
+            # Add to recent projects
+            self.add_recent_project(filename)
             
             self.add_step(
                 OperationType.PROJECT_SAVE,
