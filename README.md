@@ -95,4 +95,27 @@ MegaParse uses several different approaches to extract structured data:
 
 ## License
 
-MIT 
+MIT
+
+## Folder Structure
+
+- `src/` — main Python source files
+- `tests/` — test files
+- `data/` — data files and test data
+- `logs/` — log files
+- `config/` — configuration files
+- `README.md`, `requirements.txt`, `setup.sh` — project root for easy access
+
+## Running the Project
+
+To run the main application, use:
+
+```bash
+PYTHONPATH=src python src/main.py
+```
+
+This ensures all internal imports work correctly.
+
+## Running Tests
+
+(Adjust test instructions as needed for your test framework) 

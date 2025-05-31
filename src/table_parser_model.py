@@ -5,12 +5,12 @@ import os
 import json
 from urllib.parse import urlparse
 from bs4 import BeautifulSoup
-from parser import get_tables
+from src.parser import get_tables
 import sys
 import numpy as np
 from scipy.stats import entropy
 from difflib import SequenceMatcher
-from step_history import StepHistory, OperationType
+from src.step_history import StepHistory, OperationType
 import sqlite3
 import sqlshell
 import subprocess
