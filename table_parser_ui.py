@@ -6,7 +6,7 @@ from PyQt6.QtWidgets import (
     QInputDialog, QMenuBar
 )
 from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QPainter, QColor, QPen
+from PyQt6.QtGui import QPainter, QColor, QPen, QPalette, QFont, QIcon
 import pandas as pd
 import numpy as np
 from scipy.stats import entropy
@@ -52,46 +52,71 @@ class TableListWidget(QWidget):
         
     def init_ui(self):
         layout = QVBoxLayout(self)
-        layout.addWidget(QLabel("Available Tables:"))
+        layout.setSpacing(10)
+        layout.setContentsMargins(10, 10, 10, 10)
+        
+        # Title with modern styling
+        title_label = QLabel("Available Tables")
+        title_label.setFont(QFont("Arial", 12, QFont.Weight.Bold))
+        layout.addWidget(title_label)
         
         self.tables_list = QListWidget()
-        # Enable multi-select mode
         self.tables_list.setSelectionMode(QListWidget.SelectionMode.ExtendedSelection)
-        # Enable context menu
         self.tables_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.tables_list.customContextMenuRequested.connect(self.show_context_menu)
-        # Enable key press events
         self.tables_list.keyPressEvent = self.handle_key_press
         layout.addWidget(self.tables_list)
         
-        # Table info section
+        # Table info section with modern styling
+        info_label = QLabel("Table Information")
+        info_label.setFont(QFont("Arial", 12, QFont.Weight.Bold))
+        layout.addWidget(info_label)
+        
         self.table_info = QTextBrowser()
         self.table_info.setMaximumHeight(100)
-        layout.addWidget(QLabel("Table Information:"))
+        self.table_info.setStyleSheet("""
+            QTextBrowser {
+                background-color: #3b3b3b;
+                border: 1px solid #555555;
+                border-radius: 4px;
+                padding: 10px;
+                color: #ffffff;
+                font-size: 12px;
+            }
+        """)
         layout.addWidget(self.table_info)
         
-        # Button layout
+        # Button layout with modern styling
         button_layout = QHBoxLayout()
+        button_layout.setSpacing(10)
         
         # Delete button
         self.delete_button = QPushButton("Delete Selected")
         self.delete_button.setEnabled(False)
+        self.delete_button.setMinimumHeight(35)
         self.delete_button.clicked.connect(self.delete_selected_tables)
         button_layout.addWidget(self.delete_button)
         
         # Download button
         self.download_button = QPushButton("Save Selected Table")
         self.download_button.setEnabled(False)
+        self.download_button.setMinimumHeight(35)
         button_layout.addWidget(self.download_button)
         
-        # Format selection
+        # Format selection with modern styling
         format_layout = QHBoxLayout()
-        format_layout.addWidget(QLabel("Format:"))
+        format_layout.setSpacing(10)
+        
+        format_label = QLabel("Format:")
+        format_label.setFont(QFont("Arial", 12))
+        format_layout.addWidget(format_label)
+        
         self.format_combo = QComboBox()
+        self.format_combo.setMinimumHeight(35)
         self.format_combo.addItems(["Parquet", "CSV", "Excel"])
         format_layout.addWidget(self.format_combo)
-        button_layout.addLayout(format_layout)
         
+        button_layout.addLayout(format_layout)
         layout.addLayout(button_layout)
         
         # Connect selection changed signal
@@ -241,9 +266,66 @@ class TablePreviewWidget(QWidget):
         
     def init_ui(self):
         layout = QVBoxLayout(self)
-        layout.addWidget(QLabel("Table Preview:"))
+        layout.setSpacing(10)
+        layout.setContentsMargins(10, 10, 10, 10)
+        
+        # Title with modern styling
+        title_label = QLabel("Table Preview")
+        title_label.setFont(QFont("Arial", 12, QFont.Weight.Bold))
+        layout.addWidget(title_label)
+        
         self.table_preview = QTableWidget()
         self.table_preview.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self.table_preview.setStyleSheet("""
+            QTableWidget {
+                background-color: #3b3b3b;
+                border: 1px solid #555555;
+                border-radius: 4px;
+                gridline-color: #555555;
+            }
+            QTableWidget::item {
+                padding: 8px;
+                color: #ffffff;
+            }
+            QTableWidget::item:selected {
+                background-color: #1565c0;
+            }
+            QHeaderView::section {
+                background-color: #424242;
+                color: white;
+                padding: 8px;
+                border: 1px solid #555555;
+                font-weight: bold;
+            }
+            QScrollBar:vertical {
+                border: none;
+                background: #3b3b3b;
+                width: 10px;
+                margin: 0px;
+            }
+            QScrollBar::handle:vertical {
+                background: #555555;
+                min-height: 20px;
+                border-radius: 5px;
+            }
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+                height: 0px;
+            }
+            QScrollBar:horizontal {
+                border: none;
+                background: #3b3b3b;
+                height: 10px;
+                margin: 0px;
+            }
+            QScrollBar::handle:horizontal {
+                background: #555555;
+                min-width: 20px;
+                border-radius: 5px;
+            }
+            QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {
+                width: 0px;
+            }
+        """)
         layout.addWidget(self.table_preview)
     
     def display_dataframe(self, df):
@@ -365,6 +447,7 @@ class TableParserUI(QMainWindow):
     def __init__(self, model):
         super().__init__()
         self.model = model
+        self.setup_style()
         self.init_ui()
         
         # Load previously used URL into the URL textbox
@@ -372,84 +455,235 @@ class TableParserUI(QMainWindow):
         if last_url:
             self.url_input.setText(last_url)
         
+        # Connect table selection signals
+        self.table_list_widget.tables_list.itemClicked.connect(self.on_table_selected)
+        self.table_list_widget.tables_list.currentItemChanged.connect(self.on_table_selected)
+        self.table_list_widget.download_button.clicked.connect(self.save_table)
+
+    def setup_style(self):
+        """Setup modern dark theme and styling"""
+        # Set dark theme colors
+        self.setStyleSheet("""
+            QMainWindow {
+                background-color: #2b2b2b;
+            }
+            QWidget {
+                background-color: #2b2b2b;
+                color: #ffffff;
+            }
+            QLabel {
+                color: #ffffff;
+                font-size: 12px;
+            }
+            QLineEdit {
+                background-color: #3b3b3b;
+                border: 1px solid #555555;
+                border-radius: 4px;
+                padding: 5px;
+                color: #ffffff;
+                font-size: 12px;
+            }
+            QPushButton {
+                background-color: #0d47a1;
+                color: white;
+                border: none;
+                border-radius: 4px;
+                padding: 8px 16px;
+                font-size: 12px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #1565c0;
+            }
+            QPushButton:disabled {
+                background-color: #424242;
+                color: #757575;
+            }
+            QListWidget {
+                background-color: #3b3b3b;
+                border: 1px solid #555555;
+                border-radius: 4px;
+                padding: 5px;
+            }
+            QListWidget::item {
+                padding: 5px;
+                border-bottom: 1px solid #555555;
+            }
+            QListWidget::item:selected {
+                background-color: #1565c0;
+            }
+            QTableWidget {
+                background-color: #3b3b3b;
+                border: 1px solid #555555;
+                border-radius: 4px;
+                gridline-color: #555555;
+            }
+            QTableWidget::item {
+                padding: 5px;
+            }
+            QTableWidget::item:selected {
+                background-color: #1565c0;
+            }
+            QHeaderView::section {
+                background-color: #424242;
+                color: white;
+                padding: 5px;
+                border: 1px solid #555555;
+            }
+            QComboBox {
+                background-color: #3b3b3b;
+                border: 1px solid #555555;
+                border-radius: 4px;
+                padding: 5px;
+                color: white;
+            }
+            QComboBox::drop-down {
+                border: none;
+            }
+            QComboBox::down-arrow {
+                image: none;
+                border: none;
+            }
+            QCheckBox {
+                color: white;
+                spacing: 5px;
+            }
+            QCheckBox::indicator {
+                width: 15px;
+                height: 15px;
+            }
+            QCheckBox::indicator:unchecked {
+                border: 1px solid #555555;
+                background-color: #3b3b3b;
+            }
+            QCheckBox::indicator:checked {
+                background-color: #0d47a1;
+                border: 1px solid #0d47a1;
+            }
+            QTextBrowser {
+                background-color: #3b3b3b;
+                border: 1px solid #555555;
+                border-radius: 4px;
+                padding: 5px;
+            }
+            QMenuBar {
+                background-color: #2b2b2b;
+                color: white;
+            }
+            QMenuBar::item {
+                background-color: #2b2b2b;
+                color: white;
+                padding: 5px 10px;
+            }
+            QMenuBar::item:selected {
+                background-color: #1565c0;
+            }
+            QMenu {
+                background-color: #3b3b3b;
+                color: white;
+                border: 1px solid #555555;
+            }
+            QMenu::item {
+                padding: 5px 20px;
+            }
+            QMenu::item:selected {
+                background-color: #1565c0;
+            }
+            QStatusBar {
+                background-color: #2b2b2b;
+                color: white;
+            }
+        """)
+
     def init_ui(self):
         """Initialize user interface"""
         self.setWindowTitle("Table Parser")
         self.setGeometry(100, 100, 1200, 800)
         
-        # Create menu bar
+        # Create menu bar with modern styling
         self.menubar = self.menuBar()
-        self.menubar.setNativeMenuBar(False)  # Ensure menu bar is always visible
+        self.menubar.setNativeMenuBar(False)
         
         # File menu
-        file_menu = self.menubar.addMenu("&File")  # Added & for Alt+F shortcut
+        file_menu = self.menubar.addMenu("&File")
         
-        # New Project
+        # Add menu items with icons
         new_action = file_menu.addAction("&New Project")
-        new_action.triggered.connect(self.new_project)
         new_action.setShortcut("Ctrl+N")
+        new_action.triggered.connect(self.new_project)
         
-        # Open Project
         open_action = file_menu.addAction("&Open Project...")
-        open_action.triggered.connect(self.load_project)
         open_action.setShortcut("Ctrl+O")
+        open_action.triggered.connect(self.load_project)
         
-        # Save Project
         save_action = file_menu.addAction("&Save Project")
-        save_action.triggered.connect(self.save_project)
         save_action.setShortcut("Ctrl+S")
+        save_action.triggered.connect(self.save_project)
         
-        # Save Project As
         save_as_action = file_menu.addAction("Save Project &As...")
-        save_as_action.triggered.connect(self.save_project_as)
         save_as_action.setShortcut("Ctrl+Shift+S")
+        save_as_action.triggered.connect(self.save_project_as)
         
         file_menu.addSeparator()
         
-        # Recent Projects submenu
         self.recent_menu = file_menu.addMenu("Recent &Projects")
         self.update_recent_projects()
         
         file_menu.addSeparator()
         
-        # Exit
         exit_action = file_menu.addAction("E&xit")
-        exit_action.triggered.connect(self.close)
         exit_action.setShortcut("Ctrl+Q")
-        
-        # Main layout
+        exit_action.triggered.connect(self.close)
+
+        # Main layout with modern spacing
         main_layout = QVBoxLayout()
+        main_layout.setSpacing(10)
+        main_layout.setContentsMargins(10, 10, 10, 10)
         
-        # URL input section
+        # URL input section with modern styling
         url_layout = QHBoxLayout()
-        url_layout.addWidget(QLabel("URL:"))
+        url_layout.setSpacing(10)
+        
+        url_label = QLabel("URL:")
+        url_label.setFont(QFont("Arial", 12, QFont.Weight.Bold))
+        url_layout.addWidget(url_label)
+        
         self.url_input = QLineEdit()
-        self.url_input.setText(self.model.get_last_url())
+        self.url_input.setPlaceholderText("Enter URL to parse tables...")
+        self.url_input.setMinimumHeight(35)
         url_layout.addWidget(self.url_input)
         
-        # Fetch button
+        # Modern button styling
         self.fetch_button = QPushButton("Fetch Tables")
+        self.fetch_button.setMinimumHeight(35)
         self.fetch_button.clicked.connect(self.fetch_tables)
         url_layout.addWidget(self.fetch_button)
         
-        # Project buttons
+        # Project buttons with consistent styling
         self.new_project_button = QPushButton("New Project")
+        self.new_project_button.setMinimumHeight(35)
         self.new_project_button.clicked.connect(self.new_project)
         url_layout.addWidget(self.new_project_button)
         
         self.save_project_button = QPushButton("Save Project")
+        self.save_project_button.setMinimumHeight(35)
         self.save_project_button.clicked.connect(self.save_project)
         url_layout.addWidget(self.save_project_button)
         
         self.load_project_button = QPushButton("Load Project")
+        self.load_project_button.setMinimumHeight(35)
         self.load_project_button.clicked.connect(self.load_project)
         url_layout.addWidget(self.load_project_button)
         
         main_layout.addLayout(url_layout)
         
-        # Table type selection
+        # Table type selection with modern styling
         type_layout = QHBoxLayout()
-        type_layout.addWidget(QLabel("Table Types:"))
+        type_layout.setSpacing(15)
+        
+        type_label = QLabel("Table Types:")
+        type_label.setFont(QFont("Arial", 12, QFont.Weight.Bold))
+        type_layout.addWidget(type_label)
         
         self.standard_table_check = QCheckBox("Standard Tables")
         self.standard_table_check.setChecked(True)
@@ -463,46 +697,58 @@ class TableParserUI(QMainWindow):
         self.div_table_check.setChecked(True)
         type_layout.addWidget(self.div_table_check)
         
-        # Add remove low score button
         self.remove_low_score_button = QPushButton("Remove Low Score Tables")
+        self.remove_low_score_button.setMinimumHeight(35)
         self.remove_low_score_button.clicked.connect(self.remove_low_score_tables)
         type_layout.addWidget(self.remove_low_score_button)
         
         main_layout.addLayout(type_layout)
         
-        # Column similarity input
+        # Column similarity input with modern styling
         similarity_layout = QHBoxLayout()
-        similarity_layout.addWidget(QLabel("Color by Similarity (comma-separated column names):"))
+        similarity_layout.setSpacing(10)
+        
+        similarity_label = QLabel("Color by Similarity:")
+        similarity_label.setFont(QFont("Arial", 12, QFont.Weight.Bold))
+        similarity_layout.addWidget(similarity_label)
+        
         self.similarity_input = QLineEdit()
         self.similarity_input.setPlaceholderText("e.g., price, date, name")
+        self.similarity_input.setMinimumHeight(35)
         similarity_layout.addWidget(self.similarity_input)
         
-        # Add a button to apply similarity coloring
         self.apply_similarity_button = QPushButton("Apply Similarity")
+        self.apply_similarity_button.setMinimumHeight(35)
         self.apply_similarity_button.clicked.connect(self.update_table_colors)
         similarity_layout.addWidget(self.apply_similarity_button)
         
         main_layout.addLayout(similarity_layout)
         
-        # Splitter for tables list, preview, and steps
+        # Splitter with modern styling
         splitter = QSplitter(Qt.Orientation.Horizontal)
+        splitter.setHandleWidth(2)
+        splitter.setStyleSheet("""
+            QSplitter::handle {
+                background-color: #555555;
+            }
+        """)
         
-        # Initialize components
+        # Initialize components with modern styling
         self.table_list_widget = TableListWidget()
         self.preview_widget = TablePreviewWidget()
         
-        # Create steps list widget
+        # Create steps list widget with modern styling
         steps_widget = QWidget()
         steps_layout = QVBoxLayout(steps_widget)
-        steps_layout.addWidget(QLabel("Operation History:"))
-        self.steps_list = QListWidget()
-        steps_layout.addWidget(self.steps_list)
-        steps_widget.setMaximumWidth(300)
+        steps_layout.setSpacing(10)
         
-        # Connect signals
-        self.table_list_widget.tables_list.itemClicked.connect(self.on_table_selected)
-        self.table_list_widget.tables_list.currentItemChanged.connect(self.on_table_selected)
-        self.table_list_widget.download_button.clicked.connect(self.save_table)
+        steps_label = QLabel("Operation History:")
+        steps_label.setFont(QFont("Arial", 12, QFont.Weight.Bold))
+        steps_layout.addWidget(steps_label)
+        
+        self.steps_list = QListWidget()
+        self.steps_list.setMinimumWidth(250)
+        steps_layout.addWidget(self.steps_list)
         
         # Add widgets to splitter
         splitter.addWidget(self.table_list_widget)
@@ -517,7 +763,7 @@ class TableParserUI(QMainWindow):
         central_widget.setLayout(main_layout)
         self.setCentralWidget(central_widget)
         
-        # Status
+        # Status bar with modern styling
         self.statusBar().showMessage("Ready")
         
         # Store current table ID for similarity coloring
