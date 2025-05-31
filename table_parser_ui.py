@@ -2,7 +2,8 @@ from PyQt6.QtWidgets import (
     QMainWindow, QVBoxLayout, QHBoxLayout, QWidget, QPushButton,
     QLineEdit, QLabel, QListWidget, QListWidgetItem, QMessageBox,
     QTableWidget, QTableWidgetItem, QSplitter, QFileDialog,
-    QComboBox, QCheckBox, QGroupBox, QTextBrowser, QProgressBar, QMenu
+    QComboBox, QCheckBox, QGroupBox, QTextBrowser, QProgressBar, QMenu,
+    QInputDialog
 )
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QPainter, QColor, QPen
@@ -98,6 +99,9 @@ class TableListWidget(QWidget):
     def show_context_menu(self, position):
         """Show context menu for table list"""
         menu = QMenu()
+        rename_action = menu.addAction("Rename")
+        rename_action.triggered.connect(self.rename_selected_table)
+        menu.addSeparator()
         delete_action = menu.addAction("Delete Selected")
         delete_action.triggered.connect(self.delete_selected_tables)
         menu.exec(self.tables_list.mapToGlobal(position))
@@ -192,9 +196,42 @@ class TableListWidget(QWidget):
         """Handle key press events"""
         if event.key() == Qt.Key.Key_Delete:
             self.delete_selected_tables()
+        elif event.key() == Qt.Key.Key_F2:
+            self.rename_selected_table()
         else:
             # Call the original keyPressEvent for other keys
             QListWidget.keyPressEvent(self.tables_list, event)
+
+    def rename_selected_table(self):
+        """Rename the selected table"""
+        selected_items = self.tables_list.selectedItems()
+        if not selected_items:
+            return
+            
+        # Get parent window to access model
+        parent = self.window()
+        if not isinstance(parent, TableParserUI):
+            return
+            
+        # Get the first selected item
+        item = selected_items[0]
+        table_id = item.data(Qt.ItemDataRole.UserRole)
+        current_name = item.text().split(' ', 2)[-1]  # Remove icons and get just the name
+        
+        # Show rename dialog
+        new_name, ok = QInputDialog.getText(
+            self, "Rename Table", "Enter new name:", 
+            QLineEdit.EchoMode.Normal, current_name
+        )
+        
+        if ok and new_name and new_name != current_name:
+            # Update model
+            if parent.model.rename_table(table_id, new_name):
+                # Update UI
+                parent.update_ui()
+                parent.statusBar().showMessage(f"Table renamed to: {new_name}")
+            else:
+                QMessageBox.warning(self, "Error", "Failed to rename table")
 
 class TablePreviewWidget(QWidget):
     def __init__(self, parent=None):

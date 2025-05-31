@@ -258,4 +258,12 @@ class TableParserModel:
         self.tables = [table for table in self.tables if table["id"] != table_id]
         # Remove from dataframes dict
         if table_id in self.table_dataframes:
-            del self.table_dataframes[table_id] 
+            del self.table_dataframes[table_id]
+
+    def rename_table(self, table_id, new_name):
+        """Rename a table in the model."""
+        for table in self.tables:
+            if table["id"] == table_id:
+                table["name"] = new_name
+                return True
+        return False 
