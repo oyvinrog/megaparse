@@ -170,7 +170,7 @@ class TableListWidget(QWidget):
             parent.current_table_id = None
     
     def remove_other_tables(self):
-        """Remove all tables except the selected one"""
+        """Remove all tables except the selected ones"""
         selected_items = self.tables_list.selectedItems()
         if not selected_items:
             return
@@ -180,11 +180,11 @@ class TableListWidget(QWidget):
         if not isinstance(parent, TableParserUI):
             return
             
-        # Get the selected table ID
-        table_id = selected_items[0].data(Qt.ItemDataRole.UserRole)
+        # Get the selected table IDs
+        table_ids = [item.data(Qt.ItemDataRole.UserRole) for item in selected_items]
         
         # Remove other tables
-        count = parent.model.remove_other_tables(table_id)
+        count = parent.model.remove_other_tables(table_ids)
         
         # Update UI
         parent.update_ui()
@@ -195,7 +195,7 @@ class TableListWidget(QWidget):
         selected_items = self.tables_list.selectedItems()
         self.delete_button.setEnabled(len(selected_items) > 0)
         self.download_button.setEnabled(len(selected_items) == 1)
-        self.remove_others_button.setEnabled(len(selected_items) == 1)
+        self.remove_others_button.setEnabled(len(selected_items) > 0)
     
     def update_tables_list(self, tables, scores):
         self.tables_list.clear()

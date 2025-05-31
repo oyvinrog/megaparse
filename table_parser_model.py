@@ -297,9 +297,11 @@ class TableParserModel:
             return True
         return False
 
-    def remove_other_tables(self, keep_table_id):
-        """Remove all tables except the specified one"""
-        tables_to_remove = [t["id"] for t in self.tables if t["id"] != keep_table_id]
+    def remove_other_tables(self, keep_table_ids):
+        """Remove all tables except the specified ones"""
+        if isinstance(keep_table_ids, str):
+            keep_table_ids = [keep_table_ids]  # Handle single ID case for backward compatibility
+        tables_to_remove = [t["id"] for t in self.tables if t["id"] not in keep_table_ids]
         for table_id in tables_to_remove:
             self.remove_table(table_id)
         return len(tables_to_remove)
