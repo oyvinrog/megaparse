@@ -97,17 +97,18 @@ class TableListWidget(QWidget):
         self.delete_button.clicked.connect(self.delete_selected_tables)
         button_layout.addWidget(self.delete_button)
         
+        # Remove others button
+        self.remove_others_button = QPushButton("Remove Other Tables")
+        self.remove_others_button.setEnabled(False)
+        self.remove_others_button.setMinimumHeight(35)
+        self.remove_others_button.clicked.connect(self.remove_other_tables)
+        button_layout.addWidget(self.remove_others_button)
+        
         # Download button
         self.download_button = QPushButton("Save Selected Table")
         self.download_button.setEnabled(False)
         self.download_button.setMinimumHeight(35)
         button_layout.addWidget(self.download_button)
-        
-        # Reload button
-        self.reload_button = QPushButton("Reload")
-        self.reload_button.setMinimumHeight(35)
-        self.reload_button.clicked.connect(self.reload_data)
-        button_layout.addWidget(self.reload_button)
         
         # Format selection with modern styling
         format_layout = QHBoxLayout()
@@ -136,6 +137,9 @@ class TableListWidget(QWidget):
         menu.addSeparator()
         delete_action = menu.addAction("Delete Selected")
         delete_action.triggered.connect(self.delete_selected_tables)
+        menu.addSeparator()
+        remove_others_action = menu.addAction("Remove Other Tables")
+        remove_others_action.triggered.connect(self.remove_other_tables)
         menu.exec(self.tables_list.mapToGlobal(position))
     
     def delete_selected_tables(self):
@@ -165,11 +169,33 @@ class TableListWidget(QWidget):
             self.table_info.clear()
             parent.current_table_id = None
     
+    def remove_other_tables(self):
+        """Remove all tables except the selected one"""
+        selected_items = self.tables_list.selectedItems()
+        if not selected_items:
+            return
+            
+        # Get parent window to access model
+        parent = self.window()
+        if not isinstance(parent, TableParserUI):
+            return
+            
+        # Get the selected table ID
+        table_id = selected_items[0].data(Qt.ItemDataRole.UserRole)
+        
+        # Remove other tables
+        count = parent.model.remove_other_tables(table_id)
+        
+        # Update UI
+        parent.update_ui()
+        parent.statusBar().showMessage(f"Removed {count} other table{'s' if count > 1 else ''}")
+    
     def on_selection_changed(self):
         """Handle selection changes"""
         selected_items = self.tables_list.selectedItems()
         self.delete_button.setEnabled(len(selected_items) > 0)
         self.download_button.setEnabled(len(selected_items) == 1)
+        self.remove_others_button.setEnabled(len(selected_items) == 1)
     
     def update_tables_list(self, tables, scores):
         self.tables_list.clear()
@@ -686,7 +712,7 @@ class TableParserUI(QMainWindow):
         url_layout.addWidget(url_label)
         
         self.url_input = QLineEdit()
-        self.url_input.setPlaceholderText("Enter URL to parse tables...")
+        self.url_input.setPlaceholderText("Enter URL to parse tables from...")
         self.url_input.setMinimumHeight(35)
         url_layout.addWidget(self.url_input)
         

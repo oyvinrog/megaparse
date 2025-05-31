@@ -296,6 +296,13 @@ class TableParserModel:
             return True
         return False
 
+    def remove_other_tables(self, keep_table_id):
+        """Remove all tables except the specified one"""
+        tables_to_remove = [t["id"] for t in self.tables if t["id"] != keep_table_id]
+        for table_id in tables_to_remove:
+            self.remove_table(table_id)
+        return len(tables_to_remove)
+
     def rename_table(self, table_id, new_name):
         """Rename a table"""
         for table in self.tables:
