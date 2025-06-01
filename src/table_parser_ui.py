@@ -3,46 +3,198 @@ from PyQt6.QtWidgets import (
     QLineEdit, QLabel, QListWidget, QListWidgetItem, QMessageBox,
     QTableWidget, QTableWidgetItem, QSplitter, QFileDialog,
     QComboBox, QCheckBox, QGroupBox, QTextBrowser, QProgressBar, QMenu,
-    QInputDialog, QMenuBar
+    QInputDialog, QMenuBar, QFrame, QScrollArea, QToolBar, QStatusBar
 )
-from PyQt6.QtCore import Qt, QTimer
-from PyQt6.QtGui import QPainter, QColor, QPen, QPalette, QFont, QIcon
+from PyQt6.QtCore import Qt, QTimer, QSize
+from PyQt6.QtGui import QPainter, QColor, QPen, QPalette, QFont, QIcon, QPixmap
 import pandas as pd
 import numpy as np
 from scipy.stats import entropy
 import os
 
+class ModernCard(QFrame):
+    """A modern card widget with elevation and rounded corners"""
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setFrameStyle(QFrame.Shape.Box)
+        self.setStyleSheet("""
+            QFrame {
+                background-color: #3b3b3b;
+                border: 1px solid #555555;
+                border-radius: 8px;
+                padding: 12px;
+                margin: 4px;
+            }
+        """)
+
+class ModernButton(QPushButton):
+    """A modern button with consistent styling"""
+    def __init__(self, text, button_type="primary", parent=None):
+        super().__init__(text, parent)
+        self.button_type = button_type
+        self.setMinimumHeight(40)
+        self.setFont(QFont("Arial", 11, QFont.Weight.Medium))
+        self.apply_style()
+    
+    def apply_style(self):
+        if self.button_type == "primary":
+            self.setStyleSheet("""
+                QPushButton {
+                    background-color: #2196F3;
+                    color: white;
+                    border: none;
+                    border-radius: 6px;
+                    padding: 10px 20px;
+                    font-weight: 600;
+                }
+                QPushButton:hover {
+                    background-color: #1976D2;
+                }
+                QPushButton:pressed {
+                    background-color: #0D47A1;
+                }
+                QPushButton:disabled {
+                    background-color: #424242;
+                    color: #757575;
+                }
+            """)
+        elif self.button_type == "secondary":
+            self.setStyleSheet("""
+                QPushButton {
+                    background-color: #424242;
+                    color: white;
+                    border: 1px solid #666666;
+                    border-radius: 6px;
+                    padding: 10px 20px;
+                    font-weight: 500;
+                }
+                QPushButton:hover {
+                    background-color: #4A4A4A;
+                    border-color: #888888;
+                }
+                QPushButton:pressed {
+                    background-color: #303030;
+                }
+                QPushButton:disabled {
+                    background-color: #2b2b2b;
+                    color: #757575;
+                    border-color: #424242;
+                }
+            """)
+        elif self.button_type == "success":
+            self.setStyleSheet("""
+                QPushButton {
+                    background-color: #4CAF50;
+                    color: white;
+                    border: none;
+                    border-radius: 6px;
+                    padding: 10px 20px;
+                    font-weight: 600;
+                }
+                QPushButton:hover {
+                    background-color: #45A049;
+                }
+                QPushButton:pressed {
+                    background-color: #388E3C;
+                }
+                QPushButton:disabled {
+                    background-color: #424242;
+                    color: #757575;
+                }
+            """)
+        elif self.button_type == "danger":
+            self.setStyleSheet("""
+                QPushButton {
+                    background-color: #F44336;
+                    color: white;
+                    border: none;
+                    border-radius: 6px;
+                    padding: 10px 20px;
+                    font-weight: 600;
+                }
+                QPushButton:hover {
+                    background-color: #D32F2F;
+                }
+                QPushButton:pressed {
+                    background-color: #B71C1C;
+                }
+                QPushButton:disabled {
+                    background-color: #424242;
+                    color: #757575;
+                }
+            """)
+
+class ModernLineEdit(QLineEdit):
+    """A modern line edit with enhanced styling"""
+    def __init__(self, placeholder="", parent=None):
+        super().__init__(parent)
+        self.setPlaceholderText(placeholder)
+        self.setMinimumHeight(40)
+        self.setFont(QFont("Arial", 11))
+        self.setStyleSheet("""
+            QLineEdit {
+                background-color: #3b3b3b;
+                border: 2px solid #555555;
+                border-radius: 6px;
+                padding: 8px 12px;
+                color: #ffffff;
+                font-size: 11px;
+            }
+            QLineEdit:focus {
+                border-color: #2196F3;
+                background-color: #404040;
+            }
+            QLineEdit:hover {
+                border-color: #666666;
+            }
+        """)
+
+class SectionHeader(QLabel):
+    """A styled section header"""
+    def __init__(self, text, parent=None):
+        super().__init__(text, parent)
+        self.setFont(QFont("Arial", 14, QFont.Weight.Bold))
+        self.setStyleSheet("""
+            QLabel {
+                color: #FFFFFF;
+                padding: 8px 0px;
+                border-bottom: 2px solid #2196F3;
+                margin-bottom: 12px;
+            }
+        """)
+
 class ScoreBar(QWidget):
     def __init__(self, score, parent=None):
         super().__init__(parent)
         self.score = score
-        self.setMinimumHeight(20)
-        self.setMaximumHeight(20)
+        self.setMinimumHeight(24)
+        self.setMaximumHeight(24)
         
     def paintEvent(self, event):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         
-        # Draw background
-        painter.fillRect(self.rect(), QColor(240, 240, 240))
+        # Draw background with rounded corners
+        painter.fillRect(self.rect(), QColor(60, 60, 60))
         
-        # Draw score bar
+        # Draw score bar with rounded corners
         bar_width = int(self.width() * self.score)
         bar_rect = self.rect()
         bar_rect.setWidth(bar_width)
         
-        # Color gradient based on score
+        # Enhanced color gradient based on score
         if self.score < 0.3:
-            color = QColor(255, 100, 100)  # Red for low scores
+            color = QColor(244, 67, 54)  # Material Red
         elif self.score < 0.7:
-            color = QColor(255, 200, 100)  # Orange for medium scores
+            color = QColor(255, 152, 0)  # Material Orange
         else:
-            color = QColor(100, 200, 100)  # Green for high scores
+            color = QColor(76, 175, 80)  # Material Green
             
         painter.fillRect(bar_rect, color)
         
-        # Draw score text
-        painter.setPen(QPen(Qt.GlobalColor.black))
+        # Draw score text with better contrast
+        painter.setPen(QPen(Qt.GlobalColor.white))
+        painter.setFont(QFont("Arial", 9, QFont.Weight.Bold))
         painter.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, f"{self.score:.2f}")
 
 class TableListWidget(QWidget):
@@ -52,84 +204,148 @@ class TableListWidget(QWidget):
         
     def init_ui(self):
         layout = QVBoxLayout(self)
-        layout.setSpacing(10)
-        layout.setContentsMargins(10, 10, 10, 10)
+        layout.setSpacing(8)
+        layout.setContentsMargins(8, 8, 8, 8)
         
-        # Title with modern styling
-        title_label = QLabel("Available Tables")
-        title_label.setFont(QFont("Arial", 12, QFont.Weight.Bold))
-        layout.addWidget(title_label)
+        # Compact header
+        header = QLabel("📊 Tables")
+        header.setFont(QFont("Arial", 14, QFont.Weight.Bold))
+        header.setStyleSheet("""
+            QLabel {
+                color: #FFFFFF;
+                padding: 4px 0px;
+                border-bottom: 2px solid #2196F3;
+                margin-bottom: 8px;
+            }
+        """)
+        layout.addWidget(header)
         
+        # Table list with enhanced styling - takes most space
         self.tables_list = QListWidget()
         self.tables_list.setSelectionMode(QListWidget.SelectionMode.ExtendedSelection)
         self.tables_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.tables_list.customContextMenuRequested.connect(self.show_context_menu)
         self.tables_list.keyPressEvent = self.handle_key_press
-        layout.addWidget(self.tables_list)
+        self.tables_list.setStyleSheet("""
+            QListWidget {
+                background-color: #2b2b2b;
+                border: 1px solid #444444;
+                border-radius: 6px;
+                padding: 4px;
+                font-size: 11px;
+            }
+            QListWidget::item {
+                padding: 12px 8px;
+                border-bottom: 1px solid #333333;
+                border-radius: 4px;
+                margin: 1px 0px;
+            }
+            QListWidget::item:selected {
+                background-color: #2196F3;
+                color: white;
+            }
+            QListWidget::item:hover {
+                background-color: #383838;
+            }
+        """)
+        layout.addWidget(self.tables_list, 1)  # Give it most of the space
         
-        # Table info section with modern styling
-        info_label = QLabel("Table Information")
-        info_label.setFont(QFont("Arial", 12, QFont.Weight.Bold))
-        layout.addWidget(info_label)
+        # Compact table info section
+        info_header = QLabel("📋 Info")
+        info_header.setFont(QFont("Arial", 11, QFont.Weight.Bold))
+        info_header.setStyleSheet("color: #FFFFFF; margin-top: 8px; margin-bottom: 4px;")
+        layout.addWidget(info_header)
         
         self.table_info = QTextBrowser()
-        self.table_info.setMaximumHeight(100)
+        self.table_info.setMaximumHeight(80)  # More compact
         self.table_info.setStyleSheet("""
             QTextBrowser {
-                background-color: #3b3b3b;
-                border: 1px solid #555555;
-                border-radius: 4px;
-                padding: 10px;
-                color: #ffffff;
-                font-size: 12px;
+                background-color: #2b2b2b;
+                border: 1px solid #444444;
+                border-radius: 6px;
+                padding: 8px;
+                color: #E0E0E0;
+                font-size: 10px;
+                font-family: 'Consolas', 'Monaco', monospace;
             }
         """)
         layout.addWidget(self.table_info)
         
-        # Button layout with modern styling
-        button_layout = QHBoxLayout()
-        button_layout.setSpacing(10)
+        # Compact action section
+        actions_frame = QFrame()
+        actions_frame.setStyleSheet("""
+            QFrame {
+                background-color: #333333;
+                border: 1px solid #444444;
+                border-radius: 6px;
+                padding: 8px;
+                margin-top: 4px;
+            }
+        """)
+        actions_layout = QVBoxLayout(actions_frame)
+        actions_layout.setSpacing(6)
+        actions_layout.setContentsMargins(4, 4, 4, 4)
         
-        # Delete button
-        self.delete_button = QPushButton("Delete Selected")
-        self.delete_button.setEnabled(False)
-        self.delete_button.setMinimumHeight(35)
-        self.delete_button.clicked.connect(self.delete_selected_tables)
-        button_layout.addWidget(self.delete_button)
+        # Primary actions row
+        primary_row = QHBoxLayout()
+        primary_row.setSpacing(6)
         
-        # Add SQLite button
-        self.sqlite_button = QPushButton("Open in SQLite")
-        self.sqlite_button.setMinimumHeight(35)
-        button_layout.addWidget(self.sqlite_button)
-        
-        # Remove others button
-        self.remove_others_button = QPushButton("Remove Other Tables")
-        self.remove_others_button.setEnabled(False)
-        self.remove_others_button.setMinimumHeight(35)
-        self.remove_others_button.clicked.connect(self.remove_other_tables)
-        button_layout.addWidget(self.remove_others_button)
-        
-        # Download button
-        self.download_button = QPushButton("Save Selected Table")
+        self.download_button = ModernButton("💾 Export", "success")
         self.download_button.setEnabled(False)
-        self.download_button.setMinimumHeight(35)
-        button_layout.addWidget(self.download_button)
+        primary_row.addWidget(self.download_button)
         
-        # Format selection with modern styling
-        format_layout = QHBoxLayout()
-        format_layout.setSpacing(10)
+        self.sqlite_button = ModernButton("🗄️ SQLite", "secondary")
+        primary_row.addWidget(self.sqlite_button)
         
-        format_label = QLabel("Format:")
-        format_label.setFont(QFont("Arial", 12))
-        format_layout.addWidget(format_label)
-        
+        # Format selection in same row
         self.format_combo = QComboBox()
-        self.format_combo.setMinimumHeight(35)
+        self.format_combo.setMinimumHeight(32)
         self.format_combo.addItems(["Parquet", "CSV", "Excel"])
-        format_layout.addWidget(self.format_combo)
+        self.format_combo.setStyleSheet("""
+            QComboBox {
+                background-color: #3b3b3b;
+                border: 1px solid #555555;
+                border-radius: 4px;
+                padding: 6px 8px;
+                color: white;
+                min-width: 80px;
+                font-size: 10px;
+            }
+            QComboBox::drop-down {
+                border: none;
+                width: 20px;
+            }
+            QComboBox::down-arrow {
+                image: none;
+                border: none;
+            }
+            QComboBox QAbstractItemView {
+                background-color: #3b3b3b;
+                border: 1px solid #555555;
+                selection-background-color: #2196F3;
+            }
+        """)
+        primary_row.addWidget(self.format_combo)
         
-        button_layout.addLayout(format_layout)
-        layout.addLayout(button_layout)
+        actions_layout.addLayout(primary_row)
+        
+        # Secondary actions row
+        secondary_row = QHBoxLayout()
+        secondary_row.setSpacing(6)
+        
+        self.delete_button = ModernButton("🗑️ Delete", "danger")
+        self.delete_button.setEnabled(False)
+        self.delete_button.clicked.connect(self.delete_selected_tables)
+        secondary_row.addWidget(self.delete_button)
+        
+        self.remove_others_button = ModernButton("🧹 Keep Only", "secondary")
+        self.remove_others_button.setEnabled(False)
+        self.remove_others_button.clicked.connect(self.remove_other_tables)
+        secondary_row.addWidget(self.remove_others_button)
+        
+        actions_layout.addLayout(secondary_row)
+        
+        layout.addWidget(actions_frame)
         
         # Connect selection changed signal
         self.tables_list.itemSelectionChanged.connect(self.on_selection_changed)
@@ -325,44 +541,66 @@ class TablePreviewWidget(QWidget):
         
     def init_ui(self):
         layout = QVBoxLayout(self)
-        layout.setSpacing(10)
-        layout.setContentsMargins(10, 10, 10, 10)
+        layout.setSpacing(8)
+        layout.setContentsMargins(8, 8, 8, 8)
         
-        # Title with modern styling
-        title_label = QLabel("Table Preview")
-        title_label.setFont(QFont("Arial", 12, QFont.Weight.Bold))
-        layout.addWidget(title_label)
+        # Compact header with controls in same row
+        header_row = QHBoxLayout()
+        header_row.setSpacing(8)
         
-        # Add numeric column highlighting checkbox
-        self.highlight_numeric_check = QCheckBox("Highlight Numeric Columns")
-        self.highlight_numeric_check.setChecked(True)
-        self.highlight_numeric_check.stateChanged.connect(self.on_highlight_numeric_changed)
-        layout.addWidget(self.highlight_numeric_check)
-        
-        # Add "Use First Row as Header" button
-        self.use_first_row_header_button = QPushButton("Use First Row as Header")
-        self.use_first_row_header_button.setMinimumHeight(35)
-        self.use_first_row_header_button.setEnabled(False)  # Disabled by default
-        self.use_first_row_header_button.clicked.connect(self.on_use_first_row_as_header)
-        self.use_first_row_header_button.setStyleSheet("""
-            QPushButton {
-                background-color: #4CAF50;
-                color: white;
-                border: none;
-                border-radius: 4px;
-                font-weight: bold;
-                padding: 8px;
-            }
-            QPushButton:hover {
-                background-color: #45a049;
-            }
-            QPushButton:disabled {
-                background-color: #666666;
-                color: #999999;
+        header = QLabel("🔍 Preview")
+        header.setFont(QFont("Arial", 14, QFont.Weight.Bold))
+        header.setStyleSheet("""
+            QLabel {
+                color: #FFFFFF;
+                padding: 4px 0px;
+                border-bottom: 2px solid #2196F3;
+                margin-bottom: 8px;
             }
         """)
-        layout.addWidget(self.use_first_row_header_button)
+        header_row.addWidget(header)
         
+        header_row.addStretch()
+        
+        # Controls in header row
+        self.highlight_numeric_check = QCheckBox("📊 Numeric")
+        self.highlight_numeric_check.setChecked(True)
+        self.highlight_numeric_check.stateChanged.connect(self.on_highlight_numeric_changed)
+        self.highlight_numeric_check.setStyleSheet("""
+            QCheckBox {
+                color: #E0E0E0;
+                spacing: 8px;
+                font-size: 10px;
+            }
+            QCheckBox::indicator {
+                width: 16px;
+                height: 16px;
+                border-radius: 3px;
+            }
+            QCheckBox::indicator:unchecked {
+                border: 2px solid #555555;
+                background-color: #2b2b2b;
+            }
+            QCheckBox::indicator:checked {
+                background-color: #2196F3;
+                border: 2px solid #2196F3;
+                image: none;
+            }
+            QCheckBox::indicator:checked:hover {
+                background-color: #1976D2;
+            }
+        """)
+        header_row.addWidget(self.highlight_numeric_check)
+        
+        # Header manipulation button
+        self.use_first_row_header_button = ModernButton("📝 Use Row 1", "success")
+        self.use_first_row_header_button.setEnabled(False)
+        self.use_first_row_header_button.clicked.connect(self.on_use_first_row_as_header)
+        header_row.addWidget(self.use_first_row_header_button)
+        
+        layout.addLayout(header_row)
+        
+        # Table preview takes up most space
         self.table_preview = QTableWidget()
         self.table_preview.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         
@@ -373,56 +611,76 @@ class TablePreviewWidget(QWidget):
         
         self.table_preview.setStyleSheet("""
             QTableWidget {
-                background-color: #3b3b3b;
-                border: 1px solid #555555;
-                border-radius: 4px;
-                gridline-color: #555555;
+                background-color: #2b2b2b;
+                border: 1px solid #444444;
+                border-radius: 6px;
+                gridline-color: #404040;
+                font-size: 10px;
             }
             QTableWidget::item {
-                padding: 8px;
-                color: #ffffff;
+                padding: 6px;
+                color: #E0E0E0;
+                border-bottom: 1px solid #333333;
             }
             QTableWidget::item:selected {
-                background-color: #1565c0;
+                background-color: #2196F3;
+                color: white;
+            }
+            QTableWidget::item:hover {
+                background-color: #383838;
             }
             QHeaderView::section {
-                background-color: #424242;
+                background-color: #404040;
                 color: white;
-                padding: 8px;
+                padding: 8px 6px;
                 border: 1px solid #555555;
                 font-weight: bold;
+                font-size: 9px;
+            }
+            QHeaderView::section:hover {
+                background-color: #4A4A4A;
             }
             QScrollBar:vertical {
                 border: none;
-                background: #3b3b3b;
-                width: 10px;
+                background: #2b2b2b;
+                width: 12px;
                 margin: 0px;
+                border-radius: 6px;
             }
             QScrollBar::handle:vertical {
                 background: #555555;
                 min-height: 20px;
-                border-radius: 5px;
+                border-radius: 6px;
+                margin: 2px;
+            }
+            QScrollBar::handle:vertical:hover {
+                background: #666666;
             }
             QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
                 height: 0px;
             }
             QScrollBar:horizontal {
                 border: none;
-                background: #3b3b3b;
-                height: 10px;
+                background: #2b2b2b;
+                height: 12px;
                 margin: 0px;
+                border-radius: 6px;
             }
             QScrollBar::handle:horizontal {
                 background: #555555;
                 min-width: 20px;
-                border-radius: 5px;
+                border-radius: 6px;
+                margin: 2px;
+            }
+            QScrollBar::handle:horizontal:hover {
+                background: #666666;
             }
             QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {
                 width: 0px;
             }
         """)
-        layout.addWidget(self.table_preview)
-    
+        layout.addWidget(self.table_preview, 1)  # Takes most of the space
+
     def is_numeric_column(self, series):
         """Check if a column has a high percentage of numeric values"""
         if not isinstance(series, pd.Series):
@@ -782,360 +1040,566 @@ class TableParserUI(QMainWindow):
         self.statusBar().addPermanentWidget(self.progress_bar)
 
     def setup_style(self):
-        """Setup modern dark theme and styling"""
-        # Set window icon
-        self.setWindowIcon(QIcon.fromTheme("document-open"))
+        """Setup modern dark theme with enhanced styling"""
+        # Set window icon if available
+        try:
+            self.setWindowIcon(QIcon.fromTheme("table"))
+        except:
+            pass
         
-        # Set dark theme colors
+        # Modern Material Design inspired color scheme
         self.setStyleSheet("""
+            /* Main Window */
             QMainWindow {
-                background-color: #2b2b2b;
+                background-color: #1e1e1e;
+                color: #E0E0E0;
             }
+            
+            /* Base Widget Styling */
             QWidget {
-                background-color: #2b2b2b;
-                color: #ffffff;
+                background-color: #1e1e1e;
+                color: #E0E0E0;
+                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
             }
+            
+            /* Labels */
             QLabel {
-                color: #ffffff;
-                font-size: 12px;
+                color: #E0E0E0;
+                font-size: 11px;
+                font-weight: 400;
             }
-            QLineEdit {
-                background-color: #3b3b3b;
-                border: 1px solid #555555;
-                border-radius: 4px;
-                padding: 5px;
-                color: #ffffff;
-                font-size: 12px;
-            }
+            
+            /* Buttons - Enhanced styling handled by ModernButton class */
             QPushButton {
-                background-color: #0d47a1;
-                color: white;
-                border: none;
-                border-radius: 4px;
+                background-color: #424242;
+                color: #FFFFFF;
+                border: 1px solid #666666;
+                border-radius: 6px;
                 padding: 8px 16px;
-                font-size: 12px;
-                font-weight: bold;
+                font-size: 11px;
+                font-weight: 500;
+                min-height: 32px;
             }
             QPushButton:hover {
-                background-color: #1565c0;
+                background-color: #4A4A4A;
+                border-color: #888888;
+            }
+            QPushButton:pressed {
+                background-color: #303030;
             }
             QPushButton:disabled {
-                background-color: #424242;
-                color: #757575;
+                background-color: #2b2b2b;
+                color: #666666;
+                border-color: #444444;
             }
+            
+            /* Line Edits - Enhanced styling handled by ModernLineEdit class */
+            QLineEdit {
+                background-color: #2b2b2b;
+                border: 2px solid #444444;
+                border-radius: 6px;
+                padding: 8px 12px;
+                color: #E0E0E0;
+                font-size: 11px;
+                min-height: 24px;
+            }
+            QLineEdit:focus {
+                border-color: #2196F3;
+                background-color: #303030;
+            }
+            QLineEdit:hover {
+                border-color: #555555;
+            }
+            
+            /* List Widgets */
             QListWidget {
-                background-color: #3b3b3b;
-                border: 1px solid #555555;
-                border-radius: 4px;
-                padding: 5px;
+                background-color: #2b2b2b;
+                border: 1px solid #444444;
+                border-radius: 6px;
+                padding: 8px;
+                font-size: 11px;
+                outline: none;
             }
             QListWidget::item {
-                padding: 5px;
-                border-bottom: 1px solid #555555;
+                padding: 10px;
+                border-bottom: 1px solid #333333;
+                border-radius: 4px;
+                margin: 2px 0px;
+                color: #E0E0E0;
             }
             QListWidget::item:selected {
-                background-color: #1565c0;
+                background-color: #2196F3;
+                color: white;
+                border-bottom-color: #1976D2;
             }
+            QListWidget::item:hover {
+                background-color: #383838;
+            }
+            
+            /* Table Widgets */
             QTableWidget {
-                background-color: #3b3b3b;
-                border: 1px solid #555555;
-                border-radius: 4px;
-                gridline-color: #555555;
+                background-color: #2b2b2b;
+                border: 1px solid #444444;
+                border-radius: 6px;
+                gridline-color: #404040;
+                font-size: 10px;
+                outline: none;
             }
             QTableWidget::item {
-                padding: 5px;
+                padding: 8px;
+                color: #E0E0E0;
+                border-bottom: 1px solid #333333;
             }
             QTableWidget::item:selected {
-                background-color: #1565c0;
+                background-color: #2196F3;
+                color: white;
+            }
+            QTableWidget::item:hover {
+                background-color: #383838;
             }
             QHeaderView::section {
-                background-color: #424242;
+                background-color: #404040;
                 color: white;
-                padding: 5px;
+                padding: 10px 8px;
                 border: 1px solid #555555;
+                font-weight: bold;
+                font-size: 10px;
             }
+            QHeaderView::section:hover {
+                background-color: #4A4A4A;
+            }
+            
+            /* Combo Boxes */
             QComboBox {
-                background-color: #3b3b3b;
-                border: 1px solid #555555;
-                border-radius: 4px;
-                padding: 5px;
-                color: white;
+                background-color: #2b2b2b;
+                border: 1px solid #444444;
+                border-radius: 6px;
+                padding: 6px 8px;
+                color: #E0E0E0;
+                min-width: 100px;
+                font-size: 11px;
+            }
+            QComboBox:hover {
+                border-color: #555555;
+            }
+            QComboBox:focus {
+                border-color: #2196F3;
             }
             QComboBox::drop-down {
                 border: none;
+                width: 20px;
             }
             QComboBox::down-arrow {
                 image: none;
                 border: none;
             }
+            QComboBox QAbstractItemView {
+                background-color: #2b2b2b;
+                border: 1px solid #444444;
+                border-radius: 4px;
+                selection-background-color: #2196F3;
+                outline: none;
+            }
+            
+            /* Check Boxes */
             QCheckBox {
-                color: white;
-                spacing: 5px;
+                color: #E0E0E0;
+                spacing: 8px;
+                font-size: 11px;
             }
             QCheckBox::indicator {
-                width: 15px;
-                height: 15px;
+                width: 18px;
+                height: 18px;
+                border-radius: 3px;
             }
             QCheckBox::indicator:unchecked {
-                border: 1px solid #555555;
-                background-color: #3b3b3b;
+                border: 2px solid #555555;
+                background-color: #2b2b2b;
             }
             QCheckBox::indicator:checked {
-                background-color: #0d47a1;
-                border: 1px solid #0d47a1;
+                background-color: #2196F3;
+                border: 2px solid #2196F3;
+                image: none;
             }
+            QCheckBox::indicator:checked:hover {
+                background-color: #1976D2;
+            }
+            QCheckBox::indicator:unchecked:hover {
+                border-color: #666666;
+            }
+            
+            /* Text Browsers */
             QTextBrowser {
-                background-color: #3b3b3b;
-                border: 1px solid #555555;
-                border-radius: 4px;
-                padding: 5px;
-            }
-            QMenuBar {
                 background-color: #2b2b2b;
-                color: white;
+                border: 1px solid #444444;
+                border-radius: 6px;
+                padding: 12px;
+                color: #E0E0E0;
+                font-size: 10px;
+                font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+            }
+            
+            /* Menu Bar */
+            QMenuBar {
+                background-color: #1e1e1e;
+                color: #E0E0E0;
+                border-bottom: 1px solid #444444;
+                font-size: 11px;
             }
             QMenuBar::item {
-                background-color: #2b2b2b;
-                color: white;
-                padding: 5px 10px;
+                background-color: transparent;
+                color: #E0E0E0;
+                padding: 8px 12px;
+                border-radius: 4px;
+                margin: 2px;
             }
             QMenuBar::item:selected {
-                background-color: #1565c0;
-            }
-            QMenu {
-                background-color: #3b3b3b;
+                background-color: #2196F3;
                 color: white;
-                border: 1px solid #555555;
+            }
+            QMenuBar::item:pressed {
+                background-color: #1976D2;
+            }
+            
+            /* Menus */
+            QMenu {
+                background-color: #2b2b2b;
+                color: #E0E0E0;
+                border: 1px solid #444444;
+                border-radius: 6px;
+                padding: 4px;
+                font-size: 11px;
             }
             QMenu::item {
-                padding: 5px 20px;
+                padding: 8px 20px;
+                border-radius: 4px;
+                margin: 1px;
             }
             QMenu::item:selected {
-                background-color: #1565c0;
+                background-color: #2196F3;
+                color: white;
             }
+            QMenu::separator {
+                height: 1px;
+                background-color: #444444;
+                margin: 4px 10px;
+            }
+            
+            /* Status Bar */
             QStatusBar {
                 background-color: #1a1a1a;
-                color: #ffffff;
-                border-top: 1px solid #555555;
-                padding: 5px;
-                font-size: 12px;
-                font-weight: bold;
+                color: #E0E0E0;
+                border-top: 1px solid #444444;
+                padding: 8px;
+                font-size: 11px;
+                font-weight: 500;
+            }
+            
+            /* Progress Bar */
+            QProgressBar {
+                border: 1px solid #444444;
+                border-radius: 6px;
+                background-color: #2b2b2b;
+                text-align: center;
+                font-size: 10px;
+                color: #E0E0E0;
+                height: 20px;
+            }
+            QProgressBar::chunk {
+                background-color: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                    stop:0 #2196F3, stop:1 #1976D2);
+                border-radius: 5px;
+            }
+            
+            /* Scroll Bars */
+            QScrollBar:vertical {
+                border: none;
+                background: #2b2b2b;
+                width: 12px;
+                margin: 0px;
+                border-radius: 6px;
+            }
+            QScrollBar::handle:vertical {
+                background: #555555;
+                min-height: 20px;
+                border-radius: 6px;
+                margin: 2px;
+            }
+            QScrollBar::handle:vertical:hover {
+                background: #666666;
+            }
+            QScrollBar::handle:vertical:pressed {
+                background: #777777;
+            }
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+                height: 0px;
+            }
+            QScrollBar:horizontal {
+                border: none;
+                background: #2b2b2b;
+                height: 12px;
+                margin: 0px;
+                border-radius: 6px;
+            }
+            QScrollBar::handle:horizontal {
+                background: #555555;
+                min-width: 20px;
+                border-radius: 6px;
+                margin: 2px;
+            }
+            QScrollBar::handle:horizontal:hover {
+                background: #666666;
+            }
+            QScrollBar::handle:horizontal:pressed {
+                background: #777777;
+            }
+            QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {
+                width: 0px;
+            }
+            
+            /* Splitter */
+            QSplitter::handle {
+                background-color: #444444;
+                border-radius: 2px;
+            }
+            QSplitter::handle:hover {
+                background-color: #2196F3;
+            }
+            QSplitter::handle:pressed {
+                background-color: #1976D2;
             }
         """)
 
     def init_ui(self):
-        """Initialize user interface"""
-        self.setWindowTitle("Table Parser")
-        self.setGeometry(100, 100, 1200, 800)
+        """Initialize user interface with modern design"""
+        self.setWindowTitle("🔍 Table Parser - Modern Web Table Extraction Tool")
+        self.setGeometry(100, 100, 1600, 1000)  # Larger default window
         
         # Create menu bar with modern styling
         self.menubar = self.menuBar()
         self.menubar.setNativeMenuBar(False)
         
-        # Initialize status bar with a permanent message
+        # Initialize status bar with enhanced styling
         self.statusBar().setStyleSheet("""
             QStatusBar {
                 background-color: #1a1a1a;
-                color: #ffffff;
-                border-top: 1px solid #555555;
-                padding: 5px;
-                font-size: 12px;
-                font-weight: bold;
+                color: #E0E0E0;
+                border-top: 1px solid #444444;
+                padding: 8px;
+                font-size: 11px;
+                font-weight: 500;
             }
         """)
-        self.statusBar().showMessage("Ready")
+        self.statusBar().showMessage("🚀 Ready to parse tables")
         
-        # File menu
-        file_menu = self.menubar.addMenu("&File")
+        # File menu with enhanced organization
+        file_menu = self.menubar.addMenu("📁 &File")
         
-        # Add menu items with icons
-        new_action = file_menu.addAction(QIcon.fromTheme("document-new"), "&New Project")
+        # Project management section
+        new_action = file_menu.addAction("🆕 &New Project")
         new_action.setShortcut("Ctrl+N")
         new_action.triggered.connect(self.new_project)
         
-        open_action = file_menu.addAction(QIcon.fromTheme("document-open"), "&Open Project...")
+        open_action = file_menu.addAction("📂 &Open Project...")
         open_action.setShortcut("Ctrl+O")
         open_action.triggered.connect(self.load_project)
         
-        save_action = file_menu.addAction(QIcon.fromTheme("document-save"), "&Save Project")
+        save_action = file_menu.addAction("💾 &Save Project")
         save_action.setShortcut("Ctrl+S")
         save_action.triggered.connect(self.save_project)
         
-        save_as_action = file_menu.addAction(QIcon.fromTheme("document-save-as"), "Save Project &As...")
+        save_as_action = file_menu.addAction("💾 Save Project &As...")
         save_as_action.setShortcut("Ctrl+Shift+S")
         save_as_action.triggered.connect(self.save_project_as)
         
-        reload_action = file_menu.addAction(QIcon.fromTheme("view-refresh"), "&Reload All")
+        file_menu.addSeparator()
+        
+        reload_action = file_menu.addAction("🔄 &Reload All")
         reload_action.setShortcut("Ctrl+R")
         reload_action.triggered.connect(self.reload_all)
         
         file_menu.addSeparator()
         
-        self.recent_menu = file_menu.addMenu(QIcon.fromTheme("document-open-recent"), "Recent &Projects")
+        self.recent_menu = file_menu.addMenu("📄 Recent &Projects")
         self.update_recent_projects()
         
         file_menu.addSeparator()
         
-        exit_action = file_menu.addAction(QIcon.fromTheme("application-exit"), "E&xit")
+        exit_action = file_menu.addAction("🚪 E&xit")
         exit_action.setShortcut("Ctrl+Q")
         exit_action.triggered.connect(self.close)
 
-        # Main layout with modern spacing
-        main_layout = QVBoxLayout()
-        main_layout.setSpacing(10)
-        main_layout.setContentsMargins(10, 10, 10, 10)
+        # Main content widget - no scroll area, direct layout
+        central_widget = QWidget()
+        self.setCentralWidget(central_widget)
+        main_layout = QVBoxLayout(central_widget)
+        main_layout.setSpacing(8)
+        main_layout.setContentsMargins(8, 8, 8, 8)
         
-        # URL input section with modern styling
-        url_layout = QHBoxLayout()
-        url_layout.setSpacing(10)
+        # Compact top control panel
+        control_panel = ModernCard()
+        control_layout = QVBoxLayout(control_panel)
+        control_layout.setSpacing(8)
+        control_layout.setContentsMargins(12, 8, 12, 8)
         
-        url_label = QLabel("URL:")
-        url_label.setFont(QFont("Arial", 12, QFont.Weight.Bold))
-        url_layout.addWidget(url_label)
+        # URL section - single row
+        url_row = QHBoxLayout()
+        url_row.setSpacing(8)
         
-        self.url_input = QLineEdit()
-        self.url_input.setPlaceholderText("Enter URL to parse tables from...")
-        self.url_input.setMinimumHeight(35)
-        url_layout.addWidget(self.url_input)
+        url_label = QLabel("🔗 URL:")
+        url_label.setMinimumWidth(40)
+        url_label.setFont(QFont("Arial", 11, QFont.Weight.Medium))
+        url_row.addWidget(url_label)
         
-        # Modern button styling
-        self.fetch_button = QPushButton("Fetch Tables")
-        self.fetch_button.setMinimumHeight(35)
+        self.url_input = ModernLineEdit("Enter webpage URL...")
+        url_row.addWidget(self.url_input, 1)
+        
+        self.fetch_button = ModernButton("🚀 Extract", "primary")
         self.fetch_button.clicked.connect(self.fetch_tables)
-        url_layout.addWidget(self.fetch_button)
+        url_row.addWidget(self.fetch_button)
         
-        # Project buttons with consistent styling
-        self.new_project_button = QPushButton("New Project")
-        self.new_project_button.setMinimumHeight(35)
-        self.new_project_button.clicked.connect(self.new_project)
-        url_layout.addWidget(self.new_project_button)
+        # Table type checkboxes in same row
+        url_row.addWidget(QLabel(" | "))
         
-        self.save_project_button = QPushButton("Save Project")
-        self.save_project_button.setMinimumHeight(35)
-        self.save_project_button.clicked.connect(self.save_project)
-        url_layout.addWidget(self.save_project_button)
-        
-        self.load_project_button = QPushButton("Load Project")
-        self.load_project_button.setMinimumHeight(35)
-        self.load_project_button.clicked.connect(self.load_project)
-        url_layout.addWidget(self.load_project_button)
-        
-        # Add Reload All button
-        self.reload_all_button = QPushButton("Reload All")
-        self.reload_all_button.setMinimumHeight(35)
-        self.reload_all_button.clicked.connect(self.reload_all)
-        url_layout.addWidget(self.reload_all_button)
-        
-        main_layout.addLayout(url_layout)
-        
-        # Table type selection with modern styling
-        type_layout = QHBoxLayout()
-        type_layout.setSpacing(15)
-        
-        type_label = QLabel("Table Types:")
-        type_label.setFont(QFont("Arial", 12, QFont.Weight.Bold))
-        type_layout.addWidget(type_label)
-        
-        self.standard_table_check = QCheckBox("Standard Tables")
+        self.standard_table_check = QCheckBox("📊 HTML")
         self.standard_table_check.setChecked(True)
-        type_layout.addWidget(self.standard_table_check)
+        url_row.addWidget(self.standard_table_check)
         
-        self.advanced_table_check = QCheckBox("Advanced Tables")
+        self.advanced_table_check = QCheckBox("🔧 Advanced")
         self.advanced_table_check.setChecked(True)
-        type_layout.addWidget(self.advanced_table_check)
+        url_row.addWidget(self.advanced_table_check)
         
-        self.div_table_check = QCheckBox("Div-based Tables")
+        self.div_table_check = QCheckBox("📋 Div")
         self.div_table_check.setChecked(True)
-        type_layout.addWidget(self.div_table_check)
+        url_row.addWidget(self.div_table_check)
         
-        self.remove_low_score_button = QPushButton("Remove Low Score Tables")
-        self.remove_low_score_button.setMinimumHeight(35)
-        self.remove_low_score_button.clicked.connect(self.remove_low_score_tables)
-        type_layout.addWidget(self.remove_low_score_button)
+        url_row.addWidget(QLabel(" | "))
         
-        main_layout.addLayout(type_layout)
+        # Project controls
+        self.new_project_button = ModernButton("🆕", "secondary")
+        self.new_project_button.setMaximumWidth(40)
+        self.new_project_button.setToolTip("New Project")
+        self.new_project_button.clicked.connect(self.new_project)
+        url_row.addWidget(self.new_project_button)
         
-        # Column similarity input with modern styling
-        similarity_layout = QHBoxLayout()
-        similarity_layout.setSpacing(10)
+        self.save_project_button = ModernButton("💾", "secondary")
+        self.save_project_button.setMaximumWidth(40)
+        self.save_project_button.setToolTip("Save Project")
+        self.save_project_button.clicked.connect(self.save_project)
+        url_row.addWidget(self.save_project_button)
         
-        similarity_label = QLabel("Color by Similarity:")
-        similarity_label.setFont(QFont("Arial", 12, QFont.Weight.Bold))
-        similarity_layout.addWidget(similarity_label)
+        self.load_project_button = ModernButton("📂", "secondary")
+        self.load_project_button.setMaximumWidth(40)
+        self.load_project_button.setToolTip("Load Project")
+        self.load_project_button.clicked.connect(self.load_project)
+        url_row.addWidget(self.load_project_button)
         
-        self.similarity_input = QLineEdit()
-        self.similarity_input.setPlaceholderText("e.g., price, date, name")
-        self.similarity_input.setMinimumHeight(35)
+        self.reload_all_button = ModernButton("🔄", "secondary")
+        self.reload_all_button.setMaximumWidth(40)
+        self.reload_all_button.setToolTip("Reload All")
+        self.reload_all_button.clicked.connect(self.reload_all)
+        url_row.addWidget(self.reload_all_button)
+        
+        control_layout.addLayout(url_row)
+        
+        # Analysis tools row
+        analysis_row = QHBoxLayout()
+        analysis_row.setSpacing(8)
+        
+        analysis_label = QLabel("🔬 Analysis:")
+        analysis_label.setMinimumWidth(60)
+        analysis_label.setFont(QFont("Arial", 11, QFont.Weight.Medium))
+        analysis_row.addWidget(analysis_label)
+        
+        self.similarity_input = ModernLineEdit("Enter column names to highlight similarities...")
         self.similarity_input.returnPressed.connect(self.update_table_colors)
-        similarity_layout.addWidget(self.similarity_input)
+        analysis_row.addWidget(self.similarity_input, 1)
         
-        self.apply_similarity_button = QPushButton("Apply Similarity")
-        self.apply_similarity_button.setMinimumHeight(35)
+        self.apply_similarity_button = ModernButton("🎨 Similarity", "secondary")
         self.apply_similarity_button.clicked.connect(self.update_table_colors)
-        similarity_layout.addWidget(self.apply_similarity_button)
+        analysis_row.addWidget(self.apply_similarity_button)
         
-        main_layout.addLayout(similarity_layout)
-        
-        # Numeric column button with modern styling
-        numeric_layout = QHBoxLayout()
-        numeric_layout.setSpacing(10)
-        
-        numeric_label = QLabel("Highlight Numeric Tables:")
-        numeric_label.setFont(QFont("Arial", 12, QFont.Weight.Bold))
-        numeric_layout.addWidget(numeric_label)
-        
-        self.apply_numeric_button = QPushButton("Apply Numeric Highlighting")
-        self.apply_numeric_button.setMinimumHeight(35)
+        self.apply_numeric_button = ModernButton("📊 Numeric", "secondary")
         self.apply_numeric_button.clicked.connect(self.update_numeric_colors)
-        numeric_layout.addWidget(self.apply_numeric_button)
+        analysis_row.addWidget(self.apply_numeric_button)
         
-        main_layout.addLayout(numeric_layout)
+        self.remove_low_score_button = ModernButton("🧹 Clean", "danger")
+        self.remove_low_score_button.clicked.connect(self.remove_low_score_tables)
+        analysis_row.addWidget(self.remove_low_score_button)
         
-        # Splitter with modern styling
-        splitter = QSplitter(Qt.Orientation.Horizontal)
-        splitter.setHandleWidth(2)
-        splitter.setStyleSheet("""
+        control_layout.addLayout(analysis_row)
+        
+        main_layout.addWidget(control_panel)
+        
+        # Main workspace - now takes up most of the space
+        workspace_splitter = QSplitter(Qt.Orientation.Horizontal)
+        workspace_splitter.setHandleWidth(4)
+        workspace_splitter.setStyleSheet("""
             QSplitter::handle {
-                background-color: #555555;
+                background-color: #444444;
+                border-radius: 2px;
+            }
+            QSplitter::handle:hover {
+                background-color: #2196F3;
+            }
+            QSplitter::handle:pressed {
+                background-color: #1976D2;
             }
         """)
         
-        # Initialize components with modern styling
+        # Initialize components
         self.table_list_widget = TableListWidget()
         self.preview_widget = TablePreviewWidget()
         
-        # Create steps list widget with modern styling
-        steps_widget = QWidget()
-        steps_layout = QVBoxLayout(steps_widget)
-        steps_layout.setSpacing(10)
+        # Create operation history widget - more compact
+        history_widget = QWidget()
+        history_layout = QVBoxLayout(history_widget)
+        history_layout.setSpacing(8)
+        history_layout.setContentsMargins(8, 8, 8, 8)
         
-        steps_label = QLabel("Operation History:")
-        steps_label.setFont(QFont("Arial", 12, QFont.Weight.Bold))
-        steps_layout.addWidget(steps_label)
+        # Compact history header
+        history_header = QLabel("📝 History")
+        history_header.setFont(QFont("Arial", 12, QFont.Weight.Bold))
+        history_header.setStyleSheet("color: #FFFFFF; padding: 4px 0px; border-bottom: 1px solid #2196F3;")
+        history_layout.addWidget(history_header)
         
         self.steps_list = QListWidget()
-        self.steps_list.setMinimumWidth(250)
-        steps_layout.addWidget(self.steps_list)
+        self.steps_list.setMaximumWidth(250)
+        self.steps_list.setStyleSheet("""
+            QListWidget {
+                background-color: #2b2b2b;
+                border: 1px solid #444444;
+                border-radius: 6px;
+                padding: 4px;
+                font-size: 9px;
+            }
+            QListWidget::item {
+                padding: 6px;
+                border-bottom: 1px solid #333333;
+                border-radius: 3px;
+                margin: 1px 0px;
+                color: #E0E0E0;
+            }
+            QListWidget::item:hover {
+                background-color: #383838;
+            }
+        """)
+        history_layout.addWidget(self.steps_list)
         
-        # Add widgets to splitter
-        splitter.addWidget(self.table_list_widget)
-        splitter.addWidget(self.preview_widget)
-        splitter.addWidget(steps_widget)
-        splitter.setSizes([400, 1000, 300])
+        # Add widgets to splitter with much better proportions for table work
+        workspace_splitter.addWidget(self.table_list_widget)
+        workspace_splitter.addWidget(self.preview_widget)
+        workspace_splitter.addWidget(history_widget)
+        workspace_splitter.setSizes([450, 900, 250])  # Give preview widget most space
         
-        main_layout.addWidget(splitter)
-        
-        # Set main widget
-        central_widget = QWidget()
-        central_widget.setLayout(main_layout)
-        self.setCentralWidget(central_widget)
+        main_layout.addWidget(workspace_splitter, 1)  # Take up remaining space
         
         # Store current table ID for similarity coloring
         self.current_table_id = None
         
         # Update steps list
         self.update_steps_list()
-
+    
     def update_steps_list(self):
         """Update the steps list widget with current steps"""
         self.steps_list.clear()
@@ -1239,13 +1703,13 @@ class TableParserUI(QMainWindow):
         file_filter = ""
         file_extension = ""
         
-        if selected_format == "Parquet":
+        if selected_format == "📊 Parquet":
             file_filter = "Parquet Files (*.parquet)"
             file_extension = ".parquet"
-        elif selected_format == "CSV":
+        elif selected_format == "📈 CSV":
             file_filter = "CSV Files (*.csv)"
             file_extension = ".csv"
-        elif selected_format == "Excel":
+        elif selected_format == "📋 Excel":
             file_filter = "Excel Files (*.xlsx)"
             file_extension = ".xlsx"
         
