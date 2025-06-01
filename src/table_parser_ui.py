@@ -1475,31 +1475,6 @@ class TableParserUI(QMainWindow):
         
         url_row.addWidget(QLabel(" | "))
         
-        # Project controls
-        self.new_project_button = ModernButton("🆕", "secondary")
-        self.new_project_button.setMaximumWidth(40)
-        self.new_project_button.setToolTip("New Project")
-        self.new_project_button.clicked.connect(self.new_project)
-        url_row.addWidget(self.new_project_button)
-        
-        self.save_project_button = ModernButton("💾", "secondary")
-        self.save_project_button.setMaximumWidth(40)
-        self.save_project_button.setToolTip("Save Project")
-        self.save_project_button.clicked.connect(self.save_project)
-        url_row.addWidget(self.save_project_button)
-        
-        self.load_project_button = ModernButton("📂", "secondary")
-        self.load_project_button.setMaximumWidth(40)
-        self.load_project_button.setToolTip("Load Project")
-        self.load_project_button.clicked.connect(self.load_project)
-        url_row.addWidget(self.load_project_button)
-        
-        self.reload_all_button = ModernButton("🔄", "secondary")
-        self.reload_all_button.setMaximumWidth(40)
-        self.reload_all_button.setToolTip("Reload All")
-        self.reload_all_button.clicked.connect(self.reload_all)
-        url_row.addWidget(self.reload_all_button)
-        
         control_layout.addLayout(url_row)
         
         # Analysis tools row
