@@ -339,6 +339,30 @@ class TablePreviewWidget(QWidget):
         self.highlight_numeric_check.stateChanged.connect(self.on_highlight_numeric_changed)
         layout.addWidget(self.highlight_numeric_check)
         
+        # Add "Use First Row as Header" button
+        self.use_first_row_header_button = QPushButton("Use First Row as Header")
+        self.use_first_row_header_button.setMinimumHeight(35)
+        self.use_first_row_header_button.setEnabled(False)  # Disabled by default
+        self.use_first_row_header_button.clicked.connect(self.on_use_first_row_as_header)
+        self.use_first_row_header_button.setStyleSheet("""
+            QPushButton {
+                background-color: #4CAF50;
+                color: white;
+                border: none;
+                border-radius: 4px;
+                font-weight: bold;
+                padding: 8px;
+            }
+            QPushButton:hover {
+                background-color: #45a049;
+            }
+            QPushButton:disabled {
+                background-color: #666666;
+                color: #999999;
+            }
+        """)
+        layout.addWidget(self.use_first_row_header_button)
+        
         self.table_preview = QTableWidget()
         self.table_preview.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self.table_preview.setStyleSheet("""
@@ -420,6 +444,12 @@ class TablePreviewWidget(QWidget):
         """Display pandas DataFrame in the table widget with numeric column highlighting"""
         self.table_preview.clear()
         self.current_df = df  # Store current dataframe
+        
+        # Enable/disable the "Use First Row as Header" button based on table state
+        if df is not None and len(df) >= 2:
+            self.use_first_row_header_button.setEnabled(True)
+        else:
+            self.use_first_row_header_button.setEnabled(False)
         
         if df is None:
             return
@@ -521,8 +551,16 @@ class TablePreviewWidget(QWidget):
     def display_dataframe_with_similarity(self, df, similarity_scores, header_labels=None, header_row_index=None):
         """Display pandas DataFrame with similarity-based coloring and custom header labels if provided."""
         self.table_preview.clear()
+        
+        # Enable/disable the "Use First Row as Header" button based on table state
+        if df is not None and len(df) >= 2:
+            self.use_first_row_header_button.setEnabled(True)
+        else:
+            self.use_first_row_header_button.setEnabled(False)
+        
         if df is None:
             return
+            
         rows, cols = df.shape
         self.table_preview.setRowCount(rows)
         self.table_preview.setColumnCount(cols)
@@ -569,6 +607,13 @@ class TablePreviewWidget(QWidget):
     def display_dataframe_with_numeric(self, df, numeric_scores):
         """Display pandas DataFrame with numeric-based coloring"""
         self.table_preview.clear()
+        
+        # Enable/disable the "Use First Row as Header" button based on table state
+        if df is not None and len(df) >= 2:
+            self.use_first_row_header_button.setEnabled(True)
+        else:
+            self.use_first_row_header_button.setEnabled(False)
+        
         if df is None:
             return
             
@@ -623,6 +668,31 @@ class TablePreviewWidget(QWidget):
         header.setDefaultSectionSize(int(current_size * 1.5))
         
         self.table_preview.resizeColumnsToContents()
+
+    def on_use_first_row_as_header(self):
+        """Handle the "Use First Row as Header" button click"""
+        # Get the parent window to access the model and current table ID
+        parent = self.window()
+        if not isinstance(parent, TableParserUI):
+            return
+            
+        if not hasattr(parent, 'current_table_id') or parent.current_table_id is None:
+            return
+            
+        # Call the model method to promote first row to header
+        success, message = parent.model.promote_first_row_to_header(parent.current_table_id)
+        
+        if success:
+            # Refresh the table display
+            df = parent.model.get_table_preview(parent.current_table_id, max_rows=100)
+            if df is not None:
+                self.display_dataframe(df)
+                # Update the table list and steps
+                parent.update_ui()
+                parent.statusBar().showMessage(message)
+        else:
+            # Show error message
+            parent.statusBar().showMessage(f"Error: {message}")
 
 class TableParserUI(QMainWindow):
     def __init__(self, model):
@@ -1027,6 +1097,7 @@ class TableParserUI(QMainWindow):
         self.statusBar().showMessage("Fetching tables...")
         self.table_list_widget.tables_list.clear()
         self.preview_widget.table_preview.clear()
+        self.preview_widget.use_first_row_header_button.setEnabled(False)
         self.table_list_widget.table_info.clear()
         self.table_list_widget.download_button.setEnabled(False)
         
@@ -1090,6 +1161,7 @@ class TableParserUI(QMainWindow):
             self.statusBar().showMessage(f"Table {table_id} selected")
         else:
             self.preview_widget.table_preview.clear()
+            self.preview_widget.use_first_row_header_button.setEnabled(False)
             self.table_list_widget.table_info.clear()
             self.table_list_widget.download_button.setEnabled(False)
             self.statusBar().showMessage("Error loading table preview")
@@ -1281,6 +1353,7 @@ class TableParserUI(QMainWindow):
         self.url_input.clear()
         self.table_list_widget.tables_list.clear()
         self.preview_widget.table_preview.clear()
+        self.preview_widget.use_first_row_header_button.setEnabled(False)
         self.table_list_widget.table_info.clear()
         self.update_ui()
         
@@ -1348,6 +1421,7 @@ class TableParserUI(QMainWindow):
         # Clear UI
         self.table_list_widget.tables_list.clear()
         self.preview_widget.table_preview.clear()
+        self.preview_widget.use_first_row_header_button.setEnabled(False)
         self.table_list_widget.table_info.clear()
         self.table_list_widget.download_button.setEnabled(False)
         

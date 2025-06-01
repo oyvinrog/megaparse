@@ -16,6 +16,7 @@ class OperationType(Enum):
     ERROR = "error"
     PROJECT_SAVE = "project_save"
     PROJECT_LOAD = "project_load"
+    PROMOTE_HEADER = "promote_header"
 
 @dataclass
 class Step:

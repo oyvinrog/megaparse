@@ -376,7 +376,45 @@ class TableParserModel:
                     metadata={"table_id": table_id, "old_name": old_name, "new_name": new_name}
                 )
                 return True
-        return False 
+        return False
+
+    def promote_first_row_to_header(self, table_id):
+        """Promote the first row of a table to become the header"""
+        if table_id not in self.table_dataframes:
+            return False, "Table not found"
+        
+        df = self.table_dataframes[table_id]
+        
+        if df.empty or len(df) < 2:
+            return False, "Table must have at least 2 rows to promote first row to header"
+        
+        # Get the first row values to use as new column names
+        new_headers = [str(val) if val is not None else f"Column_{i}" for i, val in enumerate(df.iloc[0])]
+        
+        # Create a new dataframe with the first row as headers
+        new_df = df.iloc[1:].copy()
+        new_df.columns = new_headers
+        new_df.reset_index(drop=True, inplace=True)
+        
+        # Update the stored dataframe
+        self.table_dataframes[table_id] = new_df
+        
+        # Update table name to reflect the new headers
+        table_name = next((t["name"] for t in self.tables if t["id"] == table_id), f"Table {table_id}")
+        
+        # Record the operation in history
+        self.add_step(
+            OperationType.PROMOTE_HEADER,
+            f"Promoted first row to header for table: {table_name}",
+            metadata={
+                "table_id": table_id,
+                "new_headers": new_headers,
+                "old_row_count": len(df),
+                "new_row_count": len(new_df)
+            }
+        )
+        
+        return True, f"Successfully promoted first row to header. Table now has {len(new_df)} rows."
 
     def get_recent_projects(self):
         """Get list of recent projects"""
