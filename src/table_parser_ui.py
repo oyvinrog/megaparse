@@ -1179,37 +1179,25 @@ class TableParserUI(QMainWindow):
         # Get target columns for similarity if any
         target_columns = [col.strip() for col in self.similarity_input.text().split(',') if col.strip()]
         
-        # Get entropy scores
-        scores = self.model.get_table_scores()
-        if not scores:
-            return
-            
-        # Create a mapping of table IDs to their entropy scores
-        score_map = {score["id"]: score["entropy"] for score in scores}
-        
         # Filter tables with low scores based on current coloring scheme
         low_score_tables = []
-        for table in tables:
-            table_id = table["id"]
-            df = self.model.get_table_preview(table_id)
-            if df is not None:
-                # Check if table is currently marked as red based on active coloring scheme
-                items = self.table_list_widget.tables_list.findItems(table["name"], Qt.MatchFlag.MatchContains)
-                if items:
-                    item = items[0]
-                    # Check if the item's text contains the red indicator
-                    if "🔴" in item.text():
-                        low_score_tables.append(table)
+        
+        # First pass: identify red-marked tables from UI
+        for i in range(self.table_list_widget.tables_list.count()):
+            item = self.table_list_widget.tables_list.item(i)
+            if "🔴" in item.text():
+                table_id = item.data(Qt.ItemDataRole.UserRole)
+                low_score_tables.append(table_id)
         
         if not low_score_tables:
             return
             
-        # Remove tables with low scores
-        for table in low_score_tables:
-            self.model.remove_table(table["id"])
+        # Remove tables with low scores in batch
+        for table_id in low_score_tables:
+            self.model.remove_table(table_id)
             
         self.update_ui()
-        self.statusBar().showMessage("Red-marked tables removed")
+        self.statusBar().showMessage(f"Removed {len(low_score_tables)} low score table{'s' if len(low_score_tables) > 1 else ''}")
     
     def show_error(self, message):
         """Show error message"""
