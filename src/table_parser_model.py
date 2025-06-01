@@ -29,6 +29,16 @@ class TableParserModel:
         self.recent_projects_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "recent_projects.json")
         self.max_recent_projects = 10
         self.current_project_file = None  # Track current project file path
+        self.progress_callback = None  # Callback for progress updates
+    
+    def set_progress_callback(self, callback):
+        """Set a callback function to receive progress updates"""
+        self.progress_callback = callback
+    
+    def _update_progress(self, progress, message=None):
+        """Update progress if callback is set"""
+        if self.progress_callback:
+            self.progress_callback(progress, message)
     
     def add_step(self, operation: OperationType, details: str, metadata: dict = None):
         """Add a step to the operations history"""
@@ -50,6 +60,7 @@ class TableParserModel:
         self.clear_steps()  # Clear previous steps when loading new URL
         
         try:
+            self._update_progress(10, "Fetching URL...")
             headers = {
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
             }
@@ -59,12 +70,14 @@ class TableParserModel:
             self.html_content = response.text
             self.add_step(OperationType.FETCH, f"Fetched content from {url}")
             
+            self._update_progress(30, "Parsing tables...")
             # Use the parser.py functions to extract tables
             self._parse_tables()
             
             # Save the URL as the last used URL
             self.save_last_url(url)
             
+            self._update_progress(100, "Complete")
             return True, f"Found {len(self.tables)} tables"
         except requests.exceptions.RequestException as e:
             self.add_step(OperationType.ERROR, f"Error fetching URL: {str(e)}")
@@ -110,7 +123,11 @@ class TableParserModel:
             # Get all tables using the parser.py get_tables function
             all_dfs = get_tables(self.html_content)
             
+            total_tables = len(all_dfs)
             for i, df in enumerate(all_dfs):
+                progress = 30 + (i / total_tables * 60)  # Scale from 30% to 90%
+                self._update_progress(int(progress), f"Processing table {i+1}/{total_tables}")
+                
                 # Skip tables that are empty, contain only empty rows, or have columns but no actual data
                 if df.empty or df.dropna(how='all').empty:
                     continue

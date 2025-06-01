@@ -5,7 +5,7 @@ from PyQt6.QtWidgets import (
     QComboBox, QCheckBox, QGroupBox, QTextBrowser, QProgressBar, QMenu,
     QInputDialog, QMenuBar
 )
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QPainter, QColor, QPen, QPalette, QFont, QIcon
 import pandas as pd
 import numpy as np
@@ -394,16 +394,21 @@ class TablePreviewWidget(QWidget):
     
     def is_numeric_column(self, series):
         """Check if a column has a high percentage of numeric values"""
+        if not isinstance(series, pd.Series):
+            return False
+            
         total_values = len(series)
         if total_values == 0:
             return False
             
         # Try to convert to numeric, non-numeric values will become NaN
-        numeric_values = pd.to_numeric(series, errors='coerce')
-        numeric_count = numeric_values.notna().sum()
-        numeric_percentage = numeric_count / total_values
-        
-        return numeric_percentage >= 0.7  # 70% threshold for numeric columns
+        try:
+            numeric_values = pd.to_numeric(series, errors='coerce')
+            numeric_count = numeric_values.notna().sum()
+            numeric_percentage = numeric_count / total_values
+            return numeric_percentage >= 0.7  # 70% threshold for numeric columns
+        except:
+            return False
     
     def on_highlight_numeric_changed(self, state):
         """Handle numeric highlighting checkbox state change"""
@@ -623,6 +628,11 @@ class TableParserUI(QMainWindow):
         self.table_list_widget.tables_list.currentItemChanged.connect(self.on_table_selected)
         self.table_list_widget.download_button.clicked.connect(self.save_table)
         self.table_list_widget.sqlite_button.clicked.connect(self.open_in_sqlite)
+        
+        # Create progress bar
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setVisible(False)
+        self.statusBar().addPermanentWidget(self.progress_bar)
 
     def setup_style(self):
         """Setup modern dark theme and styling"""
@@ -757,8 +767,12 @@ class TableParserUI(QMainWindow):
                 background-color: #1565c0;
             }
             QStatusBar {
-                background-color: #2b2b2b;
-                color: white;
+                background-color: #1a1a1a;
+                color: #ffffff;
+                border-top: 1px solid #555555;
+                padding: 5px;
+                font-size: 12px;
+                font-weight: bold;
             }
         """)
 
@@ -770,6 +784,19 @@ class TableParserUI(QMainWindow):
         # Create menu bar with modern styling
         self.menubar = self.menuBar()
         self.menubar.setNativeMenuBar(False)
+        
+        # Initialize status bar with a permanent message
+        self.statusBar().setStyleSheet("""
+            QStatusBar {
+                background-color: #1a1a1a;
+                color: #ffffff;
+                border-top: 1px solid #555555;
+                padding: 5px;
+                font-size: 12px;
+                font-weight: bold;
+            }
+        """)
+        self.statusBar().showMessage("Ready")
         
         # File menu
         file_menu = self.menubar.addMenu("&File")
@@ -956,9 +983,6 @@ class TableParserUI(QMainWindow):
         central_widget.setLayout(main_layout)
         self.setCentralWidget(central_widget)
         
-        # Status bar with modern styling
-        self.statusBar().showMessage("Ready")
-        
         # Store current table ID for similarity coloring
         self.current_table_id = None
         
@@ -990,6 +1014,10 @@ class TableParserUI(QMainWindow):
         self.table_list_widget.table_info.clear()
         self.table_list_widget.download_button.setEnabled(False)
         
+        # Show and reset progress bar
+        self.progress_bar.setVisible(True)
+        self.progress_bar.setValue(0)
+        
         # Configure which table types to extract
         extraction_config = {
             "standard": self.standard_table_check.isChecked(),
@@ -997,14 +1025,27 @@ class TableParserUI(QMainWindow):
             "div": self.div_table_check.isChecked()
         }
         
-        success, message = self.model.load_url(url, extraction_config)
-        if success:
-            self.update_ui()
-            self.update_steps_list()  # Update steps list after fetching
-            self.statusBar().showMessage(message)
-        else:
-            self.show_error(message)
-            self.statusBar().showMessage("Error: " + message)
+        # Set up progress callback
+        def progress_callback(progress, message=None):
+            self.progress_bar.setValue(progress)
+            if message:
+                self.statusBar().showMessage(message)
+        
+        self.model.set_progress_callback(progress_callback)
+        
+        try:
+            success, message = self.model.load_url(url, extraction_config)
+            if success:
+                self.update_ui()
+                self.update_steps_list()  # Update steps list after fetching
+                self.statusBar().showMessage(message)
+            else:
+                self.show_error(message)
+                self.statusBar().showMessage("Error: " + message)
+        finally:
+            # Clean up progress bar
+            self.model.set_progress_callback(None)
+            self.progress_bar.setVisible(False)
     
     def update_ui(self):
         """Update all UI components with current model state"""
@@ -1082,32 +1123,51 @@ class TableParserUI(QMainWindow):
         target_columns = [col.strip() for col in self.similarity_input.text().split(',') if col.strip()]
         if not target_columns:
             return
+            
+        # Show in progress status
+        self.statusBar().showMessage("Applying similarity analysis...")
+        self.apply_similarity_button.setEnabled(False)
+        
         # Get all tables
         tables = self.model.get_tables()
         if not tables:
+            self.statusBar().showMessage("No tables to analyze")
+            self.apply_similarity_button.setEnabled(True)
             return
-        for table in tables:
-            table_id = table["id"]
-            df = self.model.get_table_preview(table_id)
-            if df is not None:
-                # Use best-matching header row for similarity
-                best_header, best_scores, best_row = self.model.best_header_similarity(df, target_columns)
-                # If this is the currently selected table, update the preview
-                if table_id == self.current_table_id:
-                    self.preview_widget.display_dataframe_with_similarity(df, best_scores, header_labels=best_header, header_row_index=best_row)
-                # Update the table list item with similarity information (now using target_column_match_score)
-                items = self.table_list_widget.tables_list.findItems(table["name"], Qt.MatchFlag.MatchContains)
-                if items:
-                    item = items[0]
-                    match_score = self.model.target_column_match_score(df, target_columns)
-                    if match_score < 0.3:
-                        similarity_indicator = "🔴"
-                    elif match_score < 0.7:
-                        similarity_indicator = "🟡"
-                    else:
-                        similarity_indicator = "🟢"
-                    display_text = f"{item.text().split(' ', 2)[0]} {similarity_indicator} {table['name']} (target sim: {match_score:.2f})"
-                    item.setText(display_text)
+            
+        try:
+            for i, table in enumerate(tables):
+                # Update progress
+                progress = (i + 1) / len(tables) * 100
+                self.statusBar().showMessage(f"Applying similarity analysis... {progress:.0f}%")
+                
+                table_id = table["id"]
+                df = self.model.get_table_preview(table_id)
+                if df is not None:
+                    # Use best-matching header row for similarity
+                    best_header, best_scores, best_row = self.model.best_header_similarity(df, target_columns)
+                    # If this is the currently selected table, update the preview
+                    if table_id == self.current_table_id:
+                        self.preview_widget.display_dataframe_with_similarity(df, best_scores, header_labels=best_header, header_row_index=best_row)
+                    # Update the table list item with similarity information
+                    items = self.table_list_widget.tables_list.findItems(table["name"], Qt.MatchFlag.MatchContains)
+                    if items:
+                        item = items[0]
+                        match_score = self.model.target_column_match_score(df, target_columns)
+                        if match_score < 0.3:
+                            similarity_indicator = "🔴"
+                        elif match_score < 0.7:
+                            similarity_indicator = "🟡"
+                        else:
+                            similarity_indicator = "🟢"
+                        display_text = f"{item.text().split(' ', 2)[0]} {similarity_indicator} {table['name']} (target sim: {match_score:.2f})"
+                        item.setText(display_text)
+            
+            self.statusBar().showMessage("Similarity analysis complete")
+        except Exception as e:
+            self.statusBar().showMessage(f"Error during similarity analysis: {str(e)}")
+        finally:
+            self.apply_similarity_button.setEnabled(True)
     
     def remove_low_score_tables(self):
         """Remove tables that are currently marked as red based on the active coloring scheme"""
@@ -1307,43 +1367,60 @@ class TableParserUI(QMainWindow):
 
     def update_numeric_colors(self):
         """Update table colors based on numeric content"""
+        # Show in progress status
+        self.statusBar().showMessage("Applying numeric analysis...")
+        self.apply_numeric_button.setEnabled(False)
+        
         # Get all tables
         tables = self.model.get_tables()
         if not tables:
+            self.statusBar().showMessage("No tables to analyze")
+            self.apply_numeric_button.setEnabled(True)
             return
             
-        for table in tables:
-            table_id = table["id"]
-            df = self.model.get_table_preview(table_id)
-            if df is not None:
-                # Calculate numeric scores for each column
-                numeric_scores = []
-                for col in df.columns:
-                    try:
-                        # Try to convert column to numeric
-                        numeric_values = pd.to_numeric(df[col], errors='coerce')
-                        numeric_percentage = numeric_values.notna().sum() / len(df)
-                        numeric_scores.append(numeric_percentage)
-                    except:
-                        numeric_scores.append(0)
+        try:
+            for i, table in enumerate(tables):
+                # Update progress
+                progress = (i + 1) / len(tables) * 100
+                self.statusBar().showMessage(f"Applying numeric analysis... {progress:.0f}%")
                 
-                # Get the highest numeric score for this table
-                max_numeric_score = max(numeric_scores) if numeric_scores else 0
-                
-                # If this is the currently selected table, update the preview
-                if table_id == self.current_table_id:
-                    self.preview_widget.display_dataframe_with_numeric(df, numeric_scores)
-                
-                # Update the table list item with numeric information
-                items = self.table_list_widget.tables_list.findItems(table["name"], Qt.MatchFlag.MatchContains)
-                if items:
-                    item = items[0]
-                    if max_numeric_score < 0.3:
-                        numeric_indicator = "🔴"
-                    elif max_numeric_score < 0.7:
-                        numeric_indicator = "🟡"
-                    else:
-                        numeric_indicator = "🟢"
-                        
-                    display_text = f"{item.text().split(' ', 2)[0]} {numeric_indicator} {table['name']} (numeric: {max_numeric_score:.2f})"
-                    item.setText(display_text) 
+                table_id = table["id"]
+                df = self.model.get_table_preview(table_id)
+                if df is not None:
+                    # Calculate numeric scores for each column
+                    numeric_scores = []
+                    for col in df.columns:
+                        try:
+                            # Try to convert column to numeric
+                            numeric_values = pd.to_numeric(df[col], errors='coerce')
+                            numeric_percentage = numeric_values.notna().sum() / len(df)
+                            numeric_scores.append(numeric_percentage)
+                        except:
+                            numeric_scores.append(0)
+                    
+                    # Get the highest numeric score for this table
+                    max_numeric_score = max(numeric_scores) if numeric_scores else 0
+                    
+                    # If this is the currently selected table, update the preview
+                    if table_id == self.current_table_id:
+                        self.preview_widget.display_dataframe_with_numeric(df, numeric_scores)
+                    
+                    # Update the table list item with numeric information
+                    items = self.table_list_widget.tables_list.findItems(table["name"], Qt.MatchFlag.MatchContains)
+                    if items:
+                        item = items[0]
+                        if max_numeric_score < 0.3:
+                            numeric_indicator = "🔴"
+                        elif max_numeric_score < 0.7:
+                            numeric_indicator = "🟡"
+                        else:
+                            numeric_indicator = "🟢"
+                            
+                        display_text = f"{item.text().split(' ', 2)[0]} {numeric_indicator} {table['name']} (numeric: {max_numeric_score:.2f})"
+                        item.setText(display_text)
+            
+            self.statusBar().showMessage("Numeric analysis complete")
+        except Exception as e:
+            self.statusBar().showMessage(f"Error during numeric analysis: {str(e)}")
+        finally:
+            self.apply_numeric_button.setEnabled(True) 
