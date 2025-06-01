@@ -1331,6 +1331,15 @@ class TableParserUI(QMainWindow):
             if success:
                 # Update URL input with loaded project's URL
                 self.url_input.setText(self.model.url)
+                
+                # Clear current table selection and preview
+                self.current_table_id = None
+                self.preview_widget.table_preview.clear()
+                self.preview_widget.use_first_row_header_button.setEnabled(False)
+                self.table_list_widget.table_info.clear()
+                self.table_list_widget.download_button.setEnabled(False)
+                
+                # Update UI components
                 self.update_ui()
                 self.update_steps_list()  # Also update steps list
                 self.statusBar().showMessage(message)
@@ -1401,6 +1410,15 @@ class TableParserUI(QMainWindow):
             if success:
                 # Update URL input with loaded project's URL
                 self.url_input.setText(self.model.url)
+                
+                # Clear current table selection and preview
+                self.current_table_id = None
+                self.preview_widget.table_preview.clear()
+                self.preview_widget.use_first_row_header_button.setEnabled(False)
+                self.table_list_widget.table_info.clear()
+                self.table_list_widget.download_button.setEnabled(False)
+                
+                # Update UI components
                 self.update_ui()
                 self.update_steps_list()  # Also update steps list
                 self.statusBar().showMessage(message)
