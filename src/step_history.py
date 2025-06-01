@@ -17,6 +17,7 @@ class OperationType(Enum):
     PROJECT_SAVE = "project_save"
     PROJECT_LOAD = "project_load"
     PROMOTE_HEADER = "promote_header"
+    RENAME_COLUMN = "rename_column"
 
 @dataclass
 class Step:

@@ -378,6 +378,45 @@ class TableParserModel:
                 return True
         return False
 
+    def rename_column(self, table_id, column_index, new_name):
+        """Rename a column in a table"""
+        if table_id not in self.table_dataframes:
+            return False, "Table not found"
+        
+        df = self.table_dataframes[table_id]
+        if column_index < 0 or column_index >= len(df.columns):
+            return False, "Column index out of range"
+        
+        old_name = df.columns[column_index]
+        if str(old_name) == str(new_name):
+            return False, "New name is the same as current name"
+        
+        # Create new column names list
+        new_columns = list(df.columns)
+        new_columns[column_index] = new_name
+        
+        # Update the dataframe
+        df.columns = new_columns
+        
+        # Find the table name for logging
+        table_name = None
+        for table in self.tables:
+            if table["id"] == table_id:
+                table_name = table["name"]
+                break
+        
+        if table_name is None:
+            table_name = f"Table {table_id}"
+        
+        # Add step to history
+        self.add_step(
+            OperationType.RENAME_COLUMN,
+            f"Renamed column '{old_name}' to '{new_name}' in table: {table_name}",
+            metadata={"table_id": table_id, "column_index": column_index, "old_name": str(old_name), "new_name": str(new_name)}
+        )
+        
+        return True, f"Successfully renamed column from '{old_name}' to '{new_name}'"
+
     def promote_first_row_to_header(self, table_id):
         """Promote the first row of a table to become the header"""
         if table_id not in self.table_dataframes:
@@ -559,7 +598,7 @@ class TableParserModel:
             # Store user operations that should be preserved and reapplied
             user_operations = [
                 step for step in self.steps.get_steps() 
-                if step.operation in [OperationType.DELETE, OperationType.RENAME, OperationType.PROMOTE_HEADER]
+                if step.operation in [OperationType.DELETE, OperationType.RENAME, OperationType.PROMOTE_HEADER, OperationType.RENAME_COLUMN]
             ]
             
             # Clear only tables and dataframes, not steps
@@ -667,6 +706,9 @@ class TableParserModel:
                                     f"Reapplied header promotion during reload: {message}",
                                     metadata={"table_id": new_table_id, "reapplied_during_reload": True}
                                 )
+                        elif step.operation == OperationType.RENAME_COLUMN:
+                            if "old_name" in step.metadata and "new_name" in step.metadata:
+                                self.rename_column(new_table_id, step.metadata["column_index"], step.metadata["new_name"])
             
             return True, f"Reloaded {len(self.tables)} tables"
         except Exception as e:

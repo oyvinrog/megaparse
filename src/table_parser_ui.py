@@ -365,6 +365,12 @@ class TablePreviewWidget(QWidget):
         
         self.table_preview = QTableWidget()
         self.table_preview.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        
+        # Set up context menu for column headers
+        header = self.table_preview.horizontalHeader()
+        header.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        header.customContextMenuRequested.connect(self.show_header_context_menu)
+        
         self.table_preview.setStyleSheet("""
             QTableWidget {
                 background-color: #3b3b3b;
@@ -693,6 +699,61 @@ class TablePreviewWidget(QWidget):
         else:
             # Show error message
             parent.statusBar().showMessage(f"Error: {message}")
+
+    def show_header_context_menu(self, position):
+        """Show context menu for table headers"""
+        # Get the column index from the position
+        header = self.table_preview.horizontalHeader()
+        column_index = header.logicalIndexAt(position)
+        
+        if column_index < 0:
+            return  # Click was not on a valid column
+            
+        self.selected_column_index = column_index  # Store for use in rename action
+        
+        menu = QMenu()
+        rename_action = menu.addAction("Rename Column")
+        rename_action.triggered.connect(self.rename_selected_column)
+        menu.exec(header.mapToGlobal(position))
+
+    def rename_selected_column(self):
+        """Rename the selected column"""
+        if not hasattr(self, 'selected_column_index'):
+            return
+            
+        column_index = self.selected_column_index
+        
+        # Get parent window to access model
+        parent = self.window()
+        if not isinstance(parent, TableParserUI):
+            return
+            
+        if not hasattr(parent, 'current_table_id') or parent.current_table_id is None:
+            return
+            
+        # Get current column name
+        if hasattr(self, 'current_df') and self.current_df is not None:
+            if column_index < len(self.current_df.columns):
+                current_name = str(self.current_df.columns[column_index])
+                
+                # Show rename dialog
+                new_name, ok = QInputDialog.getText(
+                    self, "Rename Column", "Enter new column name:", 
+                    QLineEdit.EchoMode.Normal, current_name
+                )
+                
+                if ok and new_name and new_name != current_name:
+                    # Update model
+                    success, message = parent.model.rename_column(parent.current_table_id, column_index, new_name)
+                    if success:
+                        # Refresh the table display
+                        df = parent.model.get_table_preview(parent.current_table_id, max_rows=100)
+                        if df is not None:
+                            self.display_dataframe(df)
+                            parent.statusBar().showMessage(message)
+                    else:
+                        QMessageBox.warning(self, "Error", message)
+                        parent.statusBar().showMessage(f"Error: {message}")
 
 class TableParserUI(QMainWindow):
     def __init__(self, model):
