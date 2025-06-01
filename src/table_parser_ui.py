@@ -321,6 +321,7 @@ class TablePreviewWidget(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.init_ui()
+        self.max_columns_for_full_processing = 50  # Threshold for full header processing
         
     def init_ui(self):
         layout = QVBoxLayout(self)
@@ -428,53 +429,63 @@ class TablePreviewWidget(QWidget):
         self.table_preview.setRowCount(rows)
         self.table_preview.setColumnCount(cols)
         
-        # Calculate entropy and numeric status for each column
-        column_entropies = []
-        numeric_columns = []
-        for col in df.columns:
-            # Calculate entropy
-            try:
-                value_counts = df[col].fillna('').astype(str).value_counts()
-                if len(value_counts) > 1:
-                    e = entropy(value_counts)
-                    max_entropy = np.log(len(value_counts))
-                    normalized_entropy = e / max_entropy if max_entropy > 0 else 0
-                else:
+        # For tables with many columns, use simplified header processing
+        if cols > self.max_columns_for_full_processing:
+            # Set simple headers without entropy/numeric processing
+            headers = []
+            for col in df.columns:
+                header_item = QTableWidgetItem(str(col))
+                header_item.setBackground(QColor(200, 255, 200))  # Light green for all headers
+                headers.append(header_item)
+        else:
+            # Calculate entropy and numeric status for each column
+            column_entropies = []
+            numeric_columns = []
+            for col in df.columns:
+                # Calculate entropy
+                try:
+                    value_counts = df[col].fillna('').astype(str).value_counts()
+                    if len(value_counts) > 1:
+                        e = entropy(value_counts)
+                        max_entropy = np.log(len(value_counts))
+                        normalized_entropy = e / max_entropy if max_entropy > 0 else 0
+                    else:
+                        normalized_entropy = 0
+                except:
                     normalized_entropy = 0
-            except:
-                normalized_entropy = 0
-            column_entropies.append(normalized_entropy)
-            
-            # Check if column is numeric
-            is_numeric = self.is_numeric_column(df[col])
-            numeric_columns.append(is_numeric)
-        
-        # Set headers with entropy and numeric information
-        headers = []
-        for j, col in enumerate(df.columns):
-            # Create header text with entropy score and numeric indicator
-            entropy_score = column_entropies[j]
-            is_numeric = numeric_columns[j]
-            header_text = f"{col}\n{entropy_score:.2f}"
-            if is_numeric and self.highlight_numeric_check.isChecked():
-                header_text += " 🔢"  # Add numeric indicator
+                column_entropies.append(normalized_entropy)
                 
-            # Create header item
-            header_item = QTableWidgetItem(header_text)
+                # Check if column is numeric
+                is_numeric = self.is_numeric_column(df[col])
+                numeric_columns.append(is_numeric)
             
-            # Set background color based on entropy and numeric status
-            if is_numeric and self.highlight_numeric_check.isChecked():
-                color = QColor(200, 200, 255)  # Light blue for numeric columns
-            elif entropy_score < 0.3:
-                color = QColor(255, 200, 200)  # Light red for low entropy
-            elif entropy_score < 0.7:
-                color = QColor(255, 255, 200)  # Light yellow for medium entropy
-            else:
-                color = QColor(200, 255, 200)  # Light green for high entropy
-            
-            header_item.setBackground(color)
-            headers.append(header_item)
+            # Set headers with entropy and numeric information
+            headers = []
+            for j, col in enumerate(df.columns):
+                # Create header text with entropy score and numeric indicator
+                entropy_score = column_entropies[j]
+                is_numeric = numeric_columns[j]
+                header_text = f"{col}\n{entropy_score:.2f}"
+                if is_numeric and self.highlight_numeric_check.isChecked():
+                    header_text += " 🔢"  # Add numeric indicator
+                    
+                # Create header item
+                header_item = QTableWidgetItem(header_text)
+                
+                # Set background color based on entropy and numeric status
+                if is_numeric and self.highlight_numeric_check.isChecked():
+                    color = QColor(200, 200, 255)  # Light blue for numeric columns
+                elif entropy_score < 0.3:
+                    color = QColor(255, 200, 200)  # Light red for low entropy
+                elif entropy_score < 0.7:
+                    color = QColor(255, 255, 200)  # Light yellow for medium entropy
+                else:
+                    color = QColor(200, 255, 200)  # Light green for high entropy
+                
+                header_item.setBackground(color)
+                headers.append(header_item)
         
+        # Set headers
         self.table_preview.setHorizontalHeaderLabels([""] * cols)
         for j, header_item in enumerate(headers):
             self.table_preview.setHorizontalHeaderItem(j, header_item)
@@ -485,8 +496,8 @@ class TablePreviewWidget(QWidget):
                 value = df.iloc[i, j]
                 item = QTableWidgetItem(str(value))
                 
-                # Color numeric values in numeric columns
-                if numeric_columns[j] and self.highlight_numeric_check.isChecked():
+                # Only apply numeric highlighting if we did full processing
+                if cols <= self.max_columns_for_full_processing and numeric_columns[j] and self.highlight_numeric_check.isChecked():
                     try:
                         float(str(value))  # Try to convert to float
                         item.setForeground(QColor(150, 200, 255))  # Light blue text for numeric values
@@ -500,7 +511,12 @@ class TablePreviewWidget(QWidget):
         current_size = header.defaultSectionSize()
         header.setDefaultSectionSize(int(current_size * 1.5))
         
-        self.table_preview.resizeColumnsToContents()
+        # Only resize columns if we have a reasonable number of columns
+        if cols <= self.max_columns_for_full_processing:
+            self.table_preview.resizeColumnsToContents()
+        else:
+            # Set a reasonable default width for many columns
+            header.setDefaultSectionSize(100)
     
     def display_dataframe_with_similarity(self, df, similarity_scores, header_labels=None, header_row_index=None):
         """Display pandas DataFrame with similarity-based coloring and custom header labels if provided."""
