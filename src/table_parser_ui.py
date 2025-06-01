@@ -332,6 +332,12 @@ class TablePreviewWidget(QWidget):
         title_label.setFont(QFont("Arial", 12, QFont.Weight.Bold))
         layout.addWidget(title_label)
         
+        # Add numeric column highlighting checkbox
+        self.highlight_numeric_check = QCheckBox("Highlight Numeric Columns")
+        self.highlight_numeric_check.setChecked(True)
+        self.highlight_numeric_check.stateChanged.connect(self.on_highlight_numeric_changed)
+        layout.addWidget(self.highlight_numeric_check)
+        
         self.table_preview = QTableWidget()
         self.table_preview.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self.table_preview.setStyleSheet("""
@@ -386,9 +392,28 @@ class TablePreviewWidget(QWidget):
         """)
         layout.addWidget(self.table_preview)
     
+    def is_numeric_column(self, series):
+        """Check if a column has a high percentage of numeric values"""
+        total_values = len(series)
+        if total_values == 0:
+            return False
+            
+        # Try to convert to numeric, non-numeric values will become NaN
+        numeric_values = pd.to_numeric(series, errors='coerce')
+        numeric_count = numeric_values.notna().sum()
+        numeric_percentage = numeric_count / total_values
+        
+        return numeric_percentage >= 0.7  # 70% threshold for numeric columns
+    
+    def on_highlight_numeric_changed(self, state):
+        """Handle numeric highlighting checkbox state change"""
+        if hasattr(self, 'current_df'):
+            self.display_dataframe(self.current_df)
+    
     def display_dataframe(self, df):
-        """Display pandas DataFrame in the table widget"""
+        """Display pandas DataFrame in the table widget with numeric column highlighting"""
         self.table_preview.clear()
+        self.current_df = df  # Store current dataframe
         
         if df is None:
             return
@@ -398,11 +423,12 @@ class TablePreviewWidget(QWidget):
         self.table_preview.setRowCount(rows)
         self.table_preview.setColumnCount(cols)
         
-        # Calculate entropy for each column
+        # Calculate entropy and numeric status for each column
         column_entropies = []
+        numeric_columns = []
         for col in df.columns:
+            # Calculate entropy
             try:
-                # Convert column to string and count frequencies
                 value_counts = df[col].fillna('').astype(str).value_counts()
                 if len(value_counts) > 1:
                     e = entropy(value_counts)
@@ -413,19 +439,28 @@ class TablePreviewWidget(QWidget):
             except:
                 normalized_entropy = 0
             column_entropies.append(normalized_entropy)
+            
+            # Check if column is numeric
+            is_numeric = self.is_numeric_column(df[col])
+            numeric_columns.append(is_numeric)
         
-        # Set headers with entropy information
+        # Set headers with entropy and numeric information
         headers = []
         for j, col in enumerate(df.columns):
-            # Create header text with entropy score
+            # Create header text with entropy score and numeric indicator
             entropy_score = column_entropies[j]
+            is_numeric = numeric_columns[j]
             header_text = f"{col}\n{entropy_score:.2f}"
-            
+            if is_numeric and self.highlight_numeric_check.isChecked():
+                header_text += " 🔢"  # Add numeric indicator
+                
             # Create header item
             header_item = QTableWidgetItem(header_text)
             
-            # Set background color based on entropy
-            if entropy_score < 0.3:
+            # Set background color based on entropy and numeric status
+            if is_numeric and self.highlight_numeric_check.isChecked():
+                color = QColor(200, 200, 255)  # Light blue for numeric columns
+            elif entropy_score < 0.3:
                 color = QColor(255, 200, 200)  # Light red for low entropy
             elif entropy_score < 0.7:
                 color = QColor(255, 255, 200)  # Light yellow for medium entropy
@@ -439,14 +474,23 @@ class TablePreviewWidget(QWidget):
         for j, header_item in enumerate(headers):
             self.table_preview.setHorizontalHeaderItem(j, header_item)
         
-        # Populate data
+        # Populate data with numeric column highlighting
         for i in range(rows):
             for j in range(cols):
                 value = df.iloc[i, j]
                 item = QTableWidgetItem(str(value))
+                
+                # Color numeric values in numeric columns
+                if numeric_columns[j] and self.highlight_numeric_check.isChecked():
+                    try:
+                        float(str(value))  # Try to convert to float
+                        item.setForeground(QColor(150, 200, 255))  # Light blue text for numeric values
+                    except (ValueError, TypeError):
+                        pass  # Not a numeric value, keep default color
+                
                 self.table_preview.setItem(i, j, item)
         
-        # Adjust header height to accommodate entropy score
+        # Adjust header height to accommodate entropy score and numeric indicator
         header = self.table_preview.horizontalHeader()
         current_size = header.defaultSectionSize()
         header.setDefaultSectionSize(int(current_size * 1.5))
@@ -500,6 +544,64 @@ class TablePreviewWidget(QWidget):
             else:
                 # Replace previous note
                 layout.itemAt(2).widget().setText(note.text())
+
+    def display_dataframe_with_numeric(self, df, numeric_scores):
+        """Display pandas DataFrame with numeric-based coloring"""
+        self.table_preview.clear()
+        if df is None:
+            return
+            
+        rows, cols = df.shape
+        self.table_preview.setRowCount(rows)
+        self.table_preview.setColumnCount(cols)
+        
+        # Set headers with numeric information
+        headers = []
+        for j, col in enumerate(df.columns):
+            numeric_score = numeric_scores[j]
+            header_text = f"{col}\n{numeric_score:.2f}"
+            if numeric_score >= 0.7:
+                header_text += " 🔢"  # Add numeric indicator
+                
+            header_item = QTableWidgetItem(header_text)
+            
+            # Set background color based on numeric score
+            if numeric_score >= 0.7:
+                color = QColor(200, 200, 255)  # Light blue for high numeric percentage
+            elif numeric_score >= 0.3:
+                color = QColor(255, 255, 200)  # Light yellow for medium numeric percentage
+            else:
+                color = QColor(255, 200, 200)  # Light red for low numeric percentage
+            
+            header_item.setBackground(color)
+            headers.append(header_item)
+        
+        self.table_preview.setHorizontalHeaderLabels([""] * cols)
+        for j, header_item in enumerate(headers):
+            self.table_preview.setHorizontalHeaderItem(j, header_item)
+        
+        # Populate data with numeric highlighting
+        for i in range(rows):
+            for j in range(cols):
+                value = df.iloc[i, j]
+                item = QTableWidgetItem(str(value))
+                
+                # Color numeric values in numeric columns
+                if numeric_scores[j] >= 0.7:
+                    try:
+                        float(str(value))  # Try to convert to float
+                        item.setForeground(QColor(150, 200, 255))  # Light blue text for numeric values
+                    except (ValueError, TypeError):
+                        pass  # Not a numeric value, keep default color
+                
+                self.table_preview.setItem(i, j, item)
+        
+        # Adjust header height
+        header = self.table_preview.horizontalHeader()
+        current_size = header.defaultSectionSize()
+        header.setDefaultSectionSize(int(current_size * 1.5))
+        
+        self.table_preview.resizeColumnsToContents()
 
 class TableParserUI(QMainWindow):
     def __init__(self, model):
@@ -800,6 +902,21 @@ class TableParserUI(QMainWindow):
         
         main_layout.addLayout(similarity_layout)
         
+        # Numeric column button with modern styling
+        numeric_layout = QHBoxLayout()
+        numeric_layout.setSpacing(10)
+        
+        numeric_label = QLabel("Highlight Numeric Tables:")
+        numeric_label.setFont(QFont("Arial", 12, QFont.Weight.Bold))
+        numeric_layout.addWidget(numeric_label)
+        
+        self.apply_numeric_button = QPushButton("Apply Numeric Highlighting")
+        self.apply_numeric_button.setMinimumHeight(35)
+        self.apply_numeric_button.clicked.connect(self.update_numeric_colors)
+        numeric_layout.addWidget(self.apply_numeric_button)
+        
+        main_layout.addLayout(numeric_layout)
+        
         # Splitter with modern styling
         splitter = QSplitter(Qt.Orientation.Horizontal)
         splitter.setHandleWidth(2)
@@ -993,7 +1110,7 @@ class TableParserUI(QMainWindow):
                     item.setText(display_text)
     
     def remove_low_score_tables(self):
-        """Remove tables with low entropy or similarity scores"""
+        """Remove tables that are currently marked as red based on the active coloring scheme"""
         # Get all tables
         tables = self.model.get_tables()
         if not tables:
@@ -1010,24 +1127,18 @@ class TableParserUI(QMainWindow):
         # Create a mapping of table IDs to their entropy scores
         score_map = {score["id"]: score["entropy"] for score in scores}
         
-        # Filter tables with low scores
+        # Filter tables with low scores based on current coloring scheme
         low_score_tables = []
         for table in tables:
             table_id = table["id"]
             df = self.model.get_table_preview(table_id)
             if df is not None:
-                # Check both entropy and similarity scores if target columns are specified
-                entropy_score = score_map.get(table_id, 0)
-                similarity_score = 0
-                
-                if target_columns:
-                    similarity_score = self.model.target_column_match_score(df, target_columns)
-                    # If we have similarity scores, use those instead of entropy
-                    if similarity_score < 0.3:
-                        low_score_tables.append(table)
-                else:
-                    # If no similarity targets, use entropy scores
-                    if entropy_score < 0.3:
+                # Check if table is currently marked as red based on active coloring scheme
+                items = self.table_list_widget.tables_list.findItems(table["name"], Qt.MatchFlag.MatchContains)
+                if items:
+                    item = items[0]
+                    # Check if the item's text contains the red indicator
+                    if "🔴" in item.text():
                         low_score_tables.append(table)
         
         if not low_score_tables:
@@ -1038,11 +1149,7 @@ class TableParserUI(QMainWindow):
             self.model.remove_table(table["id"])
             
         self.update_ui()
-        # Update the message based on which type of score was used
-        if target_columns:
-            self.statusBar().showMessage("Low similarity score tables removed")
-        else:
-            self.statusBar().showMessage("Low entropy score tables removed")
+        self.statusBar().showMessage("Red-marked tables removed")
     
     def show_error(self, message):
         """Show error message"""
@@ -1196,4 +1303,47 @@ class TableParserUI(QMainWindow):
         if success:
             self.statusBar().showMessage(message)
         else:
-            self.show_error(message) 
+            self.show_error(message)
+
+    def update_numeric_colors(self):
+        """Update table colors based on numeric content"""
+        # Get all tables
+        tables = self.model.get_tables()
+        if not tables:
+            return
+            
+        for table in tables:
+            table_id = table["id"]
+            df = self.model.get_table_preview(table_id)
+            if df is not None:
+                # Calculate numeric scores for each column
+                numeric_scores = []
+                for col in df.columns:
+                    try:
+                        # Try to convert column to numeric
+                        numeric_values = pd.to_numeric(df[col], errors='coerce')
+                        numeric_percentage = numeric_values.notna().sum() / len(df)
+                        numeric_scores.append(numeric_percentage)
+                    except:
+                        numeric_scores.append(0)
+                
+                # Get the highest numeric score for this table
+                max_numeric_score = max(numeric_scores) if numeric_scores else 0
+                
+                # If this is the currently selected table, update the preview
+                if table_id == self.current_table_id:
+                    self.preview_widget.display_dataframe_with_numeric(df, numeric_scores)
+                
+                # Update the table list item with numeric information
+                items = self.table_list_widget.tables_list.findItems(table["name"], Qt.MatchFlag.MatchContains)
+                if items:
+                    item = items[0]
+                    if max_numeric_score < 0.3:
+                        numeric_indicator = "🔴"
+                    elif max_numeric_score < 0.7:
+                        numeric_indicator = "🟡"
+                    else:
+                        numeric_indicator = "🟢"
+                        
+                    display_text = f"{item.text().split(' ', 2)[0]} {numeric_indicator} {table['name']} (numeric: {max_numeric_score:.2f})"
+                    item.setText(display_text) 
