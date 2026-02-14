@@ -65,8 +65,23 @@ class TableParserModel:
             "listing_confidence_threshold": 0.45,
             "split_listing_records": False,
             "sqlite_split_per_listing": False,
-            "filter_non_listing_tables": False
+            "filter_non_listing_tables": False,
+            "allow_interactive_challenge": True,
+            "interactive_challenge_timeout_ms": 120000
         }
+
+    def _looks_like_bot_challenge(self, html):
+        text = (html or "").lower()
+        challenge_markers = [
+            "failed challenge",
+            "challenge",
+            "captcha",
+            "verify you are human",
+            "cf-chl",
+            "access denied",
+            "checking your browser"
+        ]
+        return any(marker in text for marker in challenge_markers)
 
     def _fetch_url_content(self, url):
         headers = {
@@ -82,13 +97,55 @@ class TableParserModel:
         except Exception:
             return None, "Playwright not installed"
 
+        state_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".playwright_state.json")
+        base_context = {
+            "locale": "en-US",
+            "viewport": {"width": 1440, "height": 900},
+            "user_agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/120.0.0.0 Safari/537.36"
+            )
+        }
+
+        if os.path.exists(state_file):
+            base_context["storage_state"] = state_file
+
         try:
             with sync_playwright() as p:
-                browser = p.chromium.launch(headless=True)
-                page = browser.new_page()
+                browser = p.chromium.launch(
+                    headless=True,
+                    args=["--disable-blink-features=AutomationControlled"]
+                )
+                context = browser.new_context(**base_context)
+                page = context.new_page()
                 page.goto(url, wait_until="networkidle", timeout=45000)
                 content = page.content()
+                context.close()
                 browser.close()
+                if (
+                    self._looks_like_bot_challenge(content)
+                    and self.extraction_config.get("allow_interactive_challenge", True)
+                ):
+                    browser = p.chromium.launch(headless=False)
+                    context = browser.new_context(**base_context)
+                    page = context.new_page()
+                    page.goto(url, wait_until="domcontentloaded", timeout=45000)
+                    timeout_ms = int(self.extraction_config.get("interactive_challenge_timeout_ms", 120000))
+                    page.wait_for_timeout(timeout_ms)
+                    interactive_content = page.content()
+                    if not self._looks_like_bot_challenge(interactive_content):
+                        context.storage_state(path=state_file)
+                        content = interactive_content
+                    else:
+                        context.close()
+                        browser.close()
+                        return None, (
+                            "Bot challenge still active after interactive window. "
+                            "Complete challenge/login in the opened browser and retry."
+                        )
+                    context.close()
+                    browser.close()
                 return content, None
         except Exception as exc:
             return None, str(exc)
@@ -170,12 +227,31 @@ class TableParserModel:
         self.extraction_config = self._default_extraction_config()
         if extraction_config:
             self.extraction_config.update(extraction_config)
+        self.extraction_summary["fallback_error"] = ""
         
         try:
             self._update_progress(10, "Fetching URL...")
-            self.html_content = self._fetch_url_content(url)
-            self.extraction_summary["render_mode"] = "html"
-            self.add_step(OperationType.FETCH, f"Fetched content from {url}")
+            try:
+                self.html_content = self._fetch_url_content(url)
+                self.extraction_summary["render_mode"] = "html"
+                self.add_step(OperationType.FETCH, f"Fetched content from {url}")
+            except requests.exceptions.HTTPError as http_error:
+                response = getattr(http_error, "response", None)
+                status_code = response.status_code if response is not None else None
+                if status_code == 403 and self.extraction_config.get("enable_js_fallback", True):
+                    self._update_progress(20, "HTTP 403 detected; trying JS-rendered fallback...")
+                    rendered_html, render_error = self._render_page_with_playwright(url)
+                    if rendered_html:
+                        self.html_content = rendered_html
+                        self.extraction_summary["render_mode"] = "rendered"
+                        self.add_step(OperationType.FETCH, f"Fetched rendered content after 403 from {url}")
+                    else:
+                        if render_error:
+                            self.extraction_summary["fallback_error"] = render_error
+                            self.add_step(OperationType.ERROR, f"JS fallback unavailable after 403: {render_error}")
+                        raise
+                else:
+                    raise
             
             self._update_progress(30, "Parsing tables...")
             # Use the parser.py functions to extract tables
@@ -212,6 +288,13 @@ class TableParserModel:
             )
         except requests.exceptions.RequestException as e:
             self.add_step(OperationType.ERROR, f"Error fetching URL: {str(e)}")
+            if "403" in str(e) and self.extraction_summary.get("fallback_error"):
+                return False, (
+                    f"Error fetching URL: {str(e)}. "
+                    f"JS fallback failed: {self.extraction_summary['fallback_error']}. "
+                    "Install fallback with: `pip install playwright` and "
+                    "`python -m playwright install chromium`."
+                )
             return False, f"Error fetching URL: {str(e)}"
         except Exception as e:
             self.add_step(OperationType.ERROR, f"Error parsing tables: {str(e)}")
