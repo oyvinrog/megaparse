@@ -3,7 +3,7 @@ from PyQt6.QtWidgets import (
     QLineEdit, QLabel, QListWidget, QListWidgetItem, QMessageBox,
     QTableWidget, QTableWidgetItem, QSplitter, QFileDialog,
     QComboBox, QCheckBox, QGroupBox, QTextBrowser, QProgressBar, QMenu,
-    QInputDialog, QMenuBar, QFrame, QScrollArea, QToolBar, QStatusBar
+    QInputDialog, QMenuBar, QFrame, QScrollArea, QToolBar, QStatusBar, QSpinBox
 )
 from PyQt6.QtCore import Qt, QTimer, QSize
 from PyQt6.QtGui import QPainter, QColor, QPen, QPalette, QFont, QIcon, QPixmap
@@ -1481,6 +1481,23 @@ class TableParserUI(QMainWindow):
         self.js_fallback_check.setChecked(True)
         url_row.addWidget(self.js_fallback_check)
 
+        url_row.addWidget(QLabel("Max Pages:"))
+        self.max_pages_spin = QSpinBox()
+        self.max_pages_spin.setRange(1, 200)
+        self.max_pages_spin.setValue(10)
+        self.max_pages_spin.setMaximumWidth(80)
+        self.max_pages_spin.setStyleSheet("""
+            QSpinBox {
+                background-color: #3b3b3b;
+                border: 1px solid #555555;
+                border-radius: 4px;
+                padding: 4px 6px;
+                color: white;
+                font-size: 10px;
+            }
+        """)
+        url_row.addWidget(self.max_pages_spin)
+
         url_row.addWidget(QLabel(" | "))
         
         control_layout.addLayout(url_row)
@@ -1620,7 +1637,11 @@ class TableParserUI(QMainWindow):
             "div": self.div_table_check.isChecked(),
             "listing_mode": "auto",
             "precision": "high",
-            "enable_js_fallback": self.js_fallback_check.isChecked()
+            "enable_js_fallback": self.js_fallback_check.isChecked(),
+            "enable_pagination": True,
+            "max_pages": int(self.max_pages_spin.value()),
+            "max_empty_pages": 2,
+            "merge_across_pages": True
         }
         
         # Set up progress callback
@@ -1640,7 +1661,9 @@ class TableParserUI(QMainWindow):
                 summary_message = (
                     f"{message} | selected listing tables: {summary.get('selected_listing_tables', 0)} "
                     f"| listing records: {summary.get('listing_records', 0)} "
-                    f"| dropped: {summary.get('dropped_tables', 0)}"
+                    f"| dropped: {summary.get('dropped_tables', 0)} "
+                    f"| pages: {summary.get('pages_crawled', 1)} "
+                    f"| stop: {summary.get('stop_reason', 'single_page')}"
                 )
                 self.statusBar().showMessage(summary_message)
             else:

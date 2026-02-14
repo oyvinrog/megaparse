@@ -3,7 +3,7 @@ import pandas as pd
 import logging
 import os
 import json
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urlunparse, parse_qsl, urlencode, urljoin
 from bs4 import BeautifulSoup
 from src.parser import get_tables
 import sys
@@ -17,6 +17,7 @@ import subprocess
 import shutil
 from datetime import datetime
 import re
+import hashlib
 
 class TableParserModel:
     def __init__(self):
@@ -67,7 +68,12 @@ class TableParserModel:
             "sqlite_split_per_listing": False,
             "filter_non_listing_tables": False,
             "allow_interactive_challenge": True,
-            "interactive_challenge_timeout_ms": 120000
+            "interactive_challenge_timeout_ms": 120000,
+            "enable_pagination": True,
+            "max_pages": 10,
+            "max_empty_pages": 2,
+            "pagination_param": "page",
+            "merge_across_pages": True
         }
 
     def _looks_like_bot_challenge(self, html):
@@ -90,6 +96,139 @@ class TableParserModel:
         response = requests.get(url, headers=headers)
         response.raise_for_status()
         return response.text
+
+    def _set_query_param(self, url, key, value):
+        parsed = urlparse(url)
+        query_items = dict(parse_qsl(parsed.query, keep_blank_values=True))
+        query_items[str(key)] = str(value)
+        new_query = urlencode(query_items, doseq=True)
+        return urlunparse(parsed._replace(query=new_query))
+
+    def _get_query_param_int(self, url, key):
+        parsed = urlparse(url)
+        query_items = dict(parse_qsl(parsed.query, keep_blank_values=True))
+        if key not in query_items:
+            return None
+        try:
+            return int(query_items[key])
+        except (TypeError, ValueError):
+            return None
+
+    def _content_fingerprint(self, html):
+        return hashlib.md5((html or "").encode("utf-8")).hexdigest()
+
+    def _discover_next_page_url(self, current_url, html, page_index):
+        soup = BeautifulSoup(html or "", "lxml")
+
+        rel_next = soup.find("link", rel=lambda value: value and "next" in str(value).lower())
+        if rel_next and rel_next.get("href"):
+            return urljoin(current_url, rel_next.get("href"))
+
+        next_link = soup.find(
+            "a",
+            attrs={"rel": lambda value: value and "next" in str(value).lower()},
+            href=True
+        )
+        if next_link:
+            return urljoin(current_url, next_link.get("href"))
+
+        next_patterns = re.compile(r"^\s*(next|older|more|>|»|›)\s*$", flags=re.IGNORECASE)
+        for anchor in soup.find_all("a", href=True):
+            text = anchor.get_text(" ", strip=True)
+            aria = str(anchor.get("aria-label", "")).strip()
+            title = str(anchor.get("title", "")).strip()
+            if next_patterns.match(text) or "next" in aria.lower() or "next" in title.lower():
+                return urljoin(current_url, anchor.get("href"))
+
+        page_param = self.extraction_config.get("pagination_param", "page")
+        current_page = self._get_query_param_int(current_url, page_param)
+        if current_page is not None:
+            return self._set_query_param(current_url, page_param, current_page + 1)
+
+        return None
+
+    def _fetch_page_content(self, url):
+        render_mode = "html"
+        fallback_error = ""
+        try:
+            html = self._fetch_url_content(url)
+            self.add_step(OperationType.FETCH, f"Fetched content from {url}")
+            return html, render_mode, fallback_error
+        except requests.exceptions.HTTPError as http_error:
+            response = getattr(http_error, "response", None)
+            status_code = response.status_code if response is not None else None
+            if status_code == 403 and self.extraction_config.get("enable_js_fallback", True):
+                rendered_html, render_error = self._render_page_with_playwright(url)
+                if rendered_html:
+                    render_mode = "rendered"
+                    self.add_step(OperationType.FETCH, f"Fetched rendered content after 403 from {url}")
+                    return rendered_html, render_mode, fallback_error
+                fallback_error = render_error or ""
+                self.extraction_summary["fallback_error"] = fallback_error
+            raise
+
+    def _prepare_df_for_page(self, df, page_number, page_url):
+        prepared = df.copy()
+        if "source_page" not in prepared.columns:
+            prepared["source_page"] = page_number
+        if "source_url" not in prepared.columns:
+            prepared["source_url"] = page_url
+        return prepared
+
+    def _append_table_df(self, df):
+        table_id = len(self.tables)
+        table_type = df.attrs.get("table_type", "standard")
+        if table_type == "listing_cards":
+            listing_count = int(df.attrs.get("listing_count", df.shape[0]))
+            confidence = float(df.attrs.get("listing_confidence", 0.0))
+            name = f"Listings: {listing_count} records (conf {confidence:.2f})"
+        elif table_type == "listing_card_item":
+            listing_id = str(df.attrs.get("listing_id", ""))[:8]
+            name = f"Listing item: {listing_id}"
+        elif len(df.columns) > 0:
+            column_preview = " ".join([str(col)[:10] for col in df.columns[:3]])
+            name = f"Table {table_id+1}: {column_preview}"
+        else:
+            name = f"Table {table_id+1}"
+
+        self.tables.append({"id": table_id, "name": name, "type": table_type})
+        self.table_dataframes[table_id] = df
+        self.add_step(
+            OperationType.PARSE,
+            f"Parsed table: {name}",
+            metadata={"table_id": table_id, "rows": df.shape[0], "cols": df.shape[1]}
+        )
+
+    def _extract_tables_from_content(self, content, source_url, extraction_config):
+        all_dfs = get_tables(
+            content,
+            source_url=source_url,
+            split_listing_records=bool(extraction_config.get("split_listing_records", False))
+        )
+        filtered_dfs = []
+        for df in all_dfs:
+            if df.empty or df.dropna(how='all').empty:
+                continue
+            if not df.empty and df.shape[0] > 0 and df.shape[1] > 0:
+                has_data = False
+                for _, row in df.iterrows():
+                    if not row.dropna().empty and any(str(val).strip() != '' for val in row.dropna()):
+                        has_data = True
+                        break
+                if not has_data:
+                    continue
+            filtered_dfs.append(df)
+        return filtered_dfs
+
+    def _listing_row_key(self, row_dict):
+        listing_url = str(row_dict.get("listing_url", "")).strip()
+        if listing_url:
+            return f"url::{listing_url}"
+        listing_id = str(row_dict.get("listing_id", "")).strip()
+        if listing_id:
+            return f"id::{listing_id}"
+        raw = json.dumps(row_dict, sort_keys=True, ensure_ascii=True)
+        return f"row::{hashlib.md5(raw.encode('utf-8')).hexdigest()}"
 
     def _render_page_with_playwright(self, url):
         try:
@@ -230,51 +369,129 @@ class TableParserModel:
         self.extraction_summary["fallback_error"] = ""
         
         try:
-            self._update_progress(10, "Fetching URL...")
-            try:
-                self.html_content = self._fetch_url_content(url)
-                self.extraction_summary["render_mode"] = "html"
-                self.add_step(OperationType.FETCH, f"Fetched content from {url}")
-            except requests.exceptions.HTTPError as http_error:
-                response = getattr(http_error, "response", None)
-                status_code = response.status_code if response is not None else None
-                if status_code == 403 and self.extraction_config.get("enable_js_fallback", True):
-                    self._update_progress(20, "HTTP 403 detected; trying JS-rendered fallback...")
-                    rendered_html, render_error = self._render_page_with_playwright(url)
-                    if rendered_html:
-                        self.html_content = rendered_html
-                        self.extraction_summary["render_mode"] = "rendered"
-                        self.add_step(OperationType.FETCH, f"Fetched rendered content after 403 from {url}")
-                    else:
-                        if render_error:
-                            self.extraction_summary["fallback_error"] = render_error
-                            self.add_step(OperationType.ERROR, f"JS fallback unavailable after 403: {render_error}")
+            enable_pagination = bool(self.extraction_config.get("enable_pagination", True))
+            max_pages = int(self.extraction_config.get("max_pages", 10))
+            max_empty_pages = int(self.extraction_config.get("max_empty_pages", 2))
+            merge_across_pages = bool(self.extraction_config.get("merge_across_pages", True))
+
+            visited_urls = set()
+            seen_fingerprints = set()
+            current_url = url
+            page_index = 1
+            empty_pages = 0
+            stop_reason = "single_page"
+            pages_crawled = 0
+            records_added_per_page = []
+            last_render_mode = "html"
+            first_html_content = None
+            collected_non_listing = []
+            listing_records_map = {}
+
+            while current_url and page_index <= max_pages:
+                self._update_progress(
+                    min(20 + int((page_index - 1) * (60 / max(max_pages, 1))), 90),
+                    f"Fetching page {page_index}..."
+                )
+                if current_url in visited_urls:
+                    stop_reason = "visited_url_loop"
+                    break
+                visited_urls.add(current_url)
+
+                try:
+                    html_content, render_mode, fallback_error = self._fetch_page_content(current_url)
+                except requests.exceptions.RequestException as page_fetch_error:
+                    if pages_crawled == 0:
                         raise
+                    self.add_step(OperationType.ERROR, f"Pagination stopped at page {page_index}: {str(page_fetch_error)}")
+                    stop_reason = "fetch_error"
+                    break
+                if fallback_error:
+                    self.extraction_summary["fallback_error"] = fallback_error
+                last_render_mode = render_mode
+                if first_html_content is None:
+                    first_html_content = html_content
+
+                fingerprint = self._content_fingerprint(html_content)
+                if fingerprint in seen_fingerprints:
+                    stop_reason = "repeated_content"
+                    break
+                seen_fingerprints.add(fingerprint)
+
+                page_tables = self._extract_tables_from_content(
+                    html_content,
+                    source_url=current_url,
+                    extraction_config=self.extraction_config
+                )
+
+                added_records = 0
+                for df in page_tables:
+                    table_type = df.attrs.get("table_type", "standard")
+                    page_df = self._prepare_df_for_page(df, page_index, current_url)
+
+                    if table_type == "listing_cards" and merge_across_pages:
+                        for _, row in page_df.iterrows():
+                            row_dict = row.to_dict()
+                            key = self._listing_row_key(row_dict)
+                            if key not in listing_records_map:
+                                listing_records_map[key] = row_dict
+                                added_records += 1
+                    else:
+                        if page_index == 1:
+                            collected_non_listing.append(page_df)
+                            added_records += int(max(1, page_df.shape[0]))
+
+                records_added_per_page.append(added_records)
+                pages_crawled += 1
+                if added_records == 0:
+                    empty_pages += 1
                 else:
-                    raise
-            
-            self._update_progress(30, "Parsing tables...")
-            # Use the parser.py functions to extract tables
-            self._parse_tables(self.extraction_config)
+                    empty_pages = 0
 
-            listing_confidence = self._listing_confidence_from_tables()
-            if (
-                self.extraction_config.get("enable_js_fallback", True)
-                and listing_confidence < float(self.extraction_config.get("listing_confidence_threshold", 0.45))
-            ):
-                self._update_progress(50, "Low confidence; trying JS-rendered fallback...")
-                rendered_html, render_error = self._render_page_with_playwright(url)
-                if rendered_html:
-                    self.html_content = rendered_html
-                    self.tables = []
-                    self.table_dataframes = {}
-                    self._parse_tables(self.extraction_config)
-                    self.extraction_summary["render_mode"] = "rendered"
-                    self.add_step(OperationType.FETCH, f"Fetched rendered content from {url}")
-                elif render_error:
-                    self.add_step(OperationType.ERROR, f"JS fallback unavailable: {render_error}")
+                if not enable_pagination:
+                    stop_reason = "pagination_disabled"
+                    break
+                if empty_pages >= max_empty_pages:
+                    stop_reason = "no_new_data"
+                    break
 
+                next_url = self._discover_next_page_url(current_url, html_content, page_index)
+                if not next_url:
+                    stop_reason = "no_next_page"
+                    break
+
+                current_url = next_url
+                page_index += 1
+            else:
+                stop_reason = "max_pages_reached"
+
+            self.tables = []
+            self.table_dataframes = {}
+
+            if listing_records_map:
+                listing_df = pd.DataFrame(list(listing_records_map.values()))
+                if "confidence" in listing_df.columns:
+                    listing_conf = float(pd.to_numeric(listing_df["confidence"], errors="coerce").fillna(0).mean())
+                else:
+                    listing_conf = 0.0
+                listing_df.attrs["table_type"] = "listing_cards"
+                listing_df.attrs["listing_count"] = int(listing_df.shape[0])
+                listing_df.attrs["listing_confidence"] = listing_conf
+                self._append_table_df(listing_df)
+
+            for non_listing_df in collected_non_listing:
+                self._append_table_df(non_listing_df)
+
+            self.html_content = first_html_content or ""
+            self.extraction_summary["render_mode"] = last_render_mode
+            self.extraction_summary["pages_crawled"] = pages_crawled
+            self.extraction_summary["stop_reason"] = stop_reason
+            self.extraction_summary["records_added_per_page"] = records_added_per_page
+            self.extraction_summary["max_pages"] = max_pages
             summary = self.auto_select_listing_tables()
+            summary["pages_crawled"] = pages_crawled
+            summary["stop_reason"] = stop_reason
+            summary["records_added_per_page"] = records_added_per_page
+            summary["max_pages"] = max_pages
             
             # Save the URL as the last used URL
             self.save_last_url(url)
@@ -284,7 +501,9 @@ class TableParserModel:
                 f"Found {len(self.tables)} tables "
                 f"(listings: {summary.get('listing_records', 0)}, "
                 f"dropped: {summary.get('dropped_tables', 0)}, "
-                f"mode: {summary.get('render_mode', 'html')})"
+                f"mode: {summary.get('render_mode', 'html')}, "
+                f"pages: {summary.get('pages_crawled', 1)}, "
+                f"stop: {summary.get('stop_reason', 'single_page')})"
             )
         except requests.exceptions.RequestException as e:
             self.add_step(OperationType.ERROR, f"Error fetching URL: {str(e)}")
@@ -335,60 +554,16 @@ class TableParserModel:
         """Parse tables using parser.py functions"""
         try:
             extraction_config = extraction_config or self.extraction_config
-            # Get all tables using the parser.py get_tables function
-            all_dfs = get_tables(
+            all_dfs = self._extract_tables_from_content(
                 self.html_content,
                 source_url=self.url,
-                split_listing_records=bool(extraction_config.get("split_listing_records", False))
+                extraction_config=extraction_config
             )
-            
             total_tables = len(all_dfs)
             for i, df in enumerate(all_dfs):
                 progress = 30 + (i / max(total_tables, 1) * 60)  # Scale from 30% to 90%
                 self._update_progress(int(progress), f"Processing table {i+1}/{total_tables}")
-                
-                # Skip tables that are empty, contain only empty rows, or have columns but no actual data
-                if df.empty or df.dropna(how='all').empty:
-                    continue
-                    
-                # Also skip tables that have columns but all cells are empty or NaN
-                if not df.empty and df.shape[0] > 0 and df.shape[1] > 0:
-                    # Convert all values to string and check if any non-empty cell exists
-                    # (excluding column headers)
-                    has_data = False
-                    for _, row in df.iterrows():
-                        if not row.dropna().empty and any(str(val).strip() != '' for val in row.dropna()):
-                            has_data = True
-                            break
-                    
-                    if not has_data:
-                        continue
-                    
-                table_id = len(self.tables)
-                
-                # Create a descriptive name based on table columns or position
-                table_type = df.attrs.get("table_type", "standard")
-                if table_type == "listing_cards":
-                    listing_count = int(df.attrs.get("listing_count", df.shape[0]))
-                    confidence = float(df.attrs.get("listing_confidence", 0.0))
-                    name = f"Listings: {listing_count} records (conf {confidence:.2f})"
-                elif table_type == "listing_card_item":
-                    listing_id = str(df.attrs.get("listing_id", ""))[:8]
-                    name = f"Listing item: {listing_id}"
-                elif len(df.columns) > 0:
-                    column_preview = " ".join([str(col)[:10] for col in df.columns[:3]])
-                    name = f"Table {table_id+1}: {column_preview}"
-                else:
-                    name = f"Table {table_id+1}"
-                
-                self.tables.append({"id": table_id, "name": name, "type": table_type})
-                self.table_dataframes[table_id] = df
-                
-                self.add_step(
-                    OperationType.PARSE,
-                    f"Parsed table: {name}",
-                    metadata={"table_id": table_id, "rows": df.shape[0], "cols": df.shape[1]}
-                )
+                self._append_table_df(df)
         except Exception as e:
             logging.error(f"Error parsing tables: {str(e)}")
             self.add_step(OperationType.ERROR, f"Error parsing tables: {str(e)}")
@@ -472,7 +647,10 @@ class TableParserModel:
                 "detected_listing_tables": self.extraction_summary.get("detected_listing_tables", 0),
                 "selected_listing_tables": self.extraction_summary.get("selected_listing_tables", 0),
                 "listing_records": self.extraction_summary.get("listing_records", 0),
-                "dropped_tables": self.extraction_summary.get("dropped_tables", 0)
+                "dropped_tables": self.extraction_summary.get("dropped_tables", 0),
+                "pages_crawled": self.extraction_summary.get("pages_crawled", 1),
+                "stop_reason": self.extraction_summary.get("stop_reason", "single_page"),
+                "max_pages": self.extraction_summary.get("max_pages", self.extraction_config.get("max_pages", 10))
             }])
             metadata_df.to_sql("extraction_metadata", conn, if_exists='replace', index=False)
             
