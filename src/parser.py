@@ -10,6 +10,7 @@ import os
 import hashlib
 import re
 from io import StringIO
+from urllib.parse import urljoin
 # Add color constants
 GREEN = '\033[92m'
 BOLD = '\033[1m'
@@ -38,6 +39,167 @@ def getch():
     finally:
         termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
     return ch
+
+def _clean_text(value):
+    if value is None:
+        return ""
+    return re.sub(r"\s+", " ", str(value)).strip()
+
+def _extract_record_from_card(card, source_url=None):
+    text = _clean_text(card.get_text(separator=" ", strip=True))
+    if len(text) < 20:
+        return None
+
+    anchors = [a for a in card.find_all("a", href=True) if _clean_text(a.get("href"))]
+    if not anchors:
+        return None
+
+    primary_link = max(anchors, key=lambda a: len(_clean_text(a.get_text(" ", strip=True))))
+    href = _clean_text(primary_link.get("href"))
+    listing_url = urljoin(source_url, href) if source_url else href
+
+    title = _clean_text(primary_link.get_text(" ", strip=True))
+    if len(title) < 4:
+        heading = card.find(["h1", "h2", "h3", "h4"])
+        title = _clean_text(heading.get_text(" ", strip=True) if heading else "")
+    if len(title) < 4:
+        return None
+
+    price_match = re.search(
+        r"((?:\d[\d\s.,]{2,})\s*(?:kr|nok|sek|dkk|eur|usd|€|\$|£))",
+        text,
+        flags=re.IGNORECASE
+    )
+    area_match = re.search(r"(\d{1,4}\s*(?:m²|m2|kvm|sqm|sq ?ft))", text, flags=re.IGNORECASE)
+    rooms_match = re.search(r"(\d+(?:[.,]\d+)?)\s*(?:rom|rooms|soverom|bed)", text, flags=re.IGNORECASE)
+    location_match = re.search(r"\b\d{4,5}\b\s+[A-Za-zÀ-ÿ\- ]{2,40}", text)
+
+    price_text = _clean_text(price_match.group(1)) if price_match else ""
+    area_text = _clean_text(area_match.group(1)) if area_match else ""
+    rooms_text = _clean_text(rooms_match.group(0)) if rooms_match else ""
+    location_text = _clean_text(location_match.group(0)) if location_match else ""
+
+    has_structured_signal = any([price_text, area_text, rooms_text, location_text])
+    if not has_structured_signal:
+        return None
+
+    signal_count = sum([
+        bool(listing_url),
+        bool(title),
+        bool(price_text),
+        bool(location_text or area_text or rooms_text),
+        len(text) > 40
+    ])
+    confidence = round(signal_count / 5.0, 3)
+
+    listing_id_input = "||".join([listing_url, title, price_text, location_text, area_text, rooms_text])
+    listing_id = hashlib.md5(listing_id_input.encode("utf-8")).hexdigest()[:16]
+
+    return {
+        "listing_id": listing_id,
+        "source_url": source_url or "",
+        "listing_url": listing_url,
+        "title": title,
+        "price_text": price_text,
+        "location_text": location_text,
+        "area_text": area_text,
+        "rooms_text": rooms_text,
+        "raw_text": text[:1200],
+        "confidence": confidence,
+        "container_signature": f"{card.name}:{len(card.find_all(recursive=False))}"
+    }
+
+def extract_listing_records(soup, source_url=None, min_repeats=3):
+    """
+    Extract listing-like records from repeated card-like structures.
+    Site-agnostic: relies on repeated layout + text signals, not fixed selectors.
+    """
+    candidates = []
+    candidate_tags = ["div", "section", "article", "li"]
+
+    for parent in soup.find_all(["main", "section", "div", "ul", "ol", "article"]):
+        children = [c for c in parent.find_all(recursive=False) if c.name in candidate_tags]
+        if len(children) < min_repeats:
+            continue
+
+        groups = defaultdict(list)
+        for child in children:
+            sig = (
+                child.name,
+                len(child.find_all(recursive=False)),
+                tuple(sorted((child.get("class") or [])[:2]))
+            )
+            groups[sig].append(child)
+
+        for group in groups.values():
+            if len(group) < min_repeats:
+                continue
+
+            records = []
+            for card in group:
+                record = _extract_record_from_card(card, source_url=source_url)
+                if record:
+                    records.append(record)
+
+            if len(records) < min_repeats:
+                continue
+
+            unique_links = len({r["listing_url"] for r in records if r["listing_url"]})
+            if unique_links < max(2, int(0.6 * len(records))):
+                continue
+
+            candidates.extend(records)
+
+    deduped = {}
+    for record in candidates:
+        key = record["listing_url"] or f"{record['title']}::{record['price_text']}"
+        if key not in deduped or record["confidence"] > deduped[key]["confidence"]:
+            deduped[key] = record
+
+    return list(deduped.values())
+
+def records_to_table_candidates(records, split_per_record=False):
+    if not records:
+        return []
+
+    main_df = pd.DataFrame(records)
+    main_df = main_df.sort_values(by=["confidence", "title"], ascending=[False, True]).reset_index(drop=True)
+    main_df.attrs["table_type"] = "listing_cards"
+    main_df.attrs["listing_count"] = int(main_df.shape[0])
+    main_df.attrs["listing_confidence"] = float(main_df["confidence"].mean()) if "confidence" in main_df.columns else 0.0
+    main_df.attrs["split_per_record"] = bool(split_per_record)
+
+    tables = [main_df]
+
+    if split_per_record:
+        for _, row in main_df.iterrows():
+            per_item_df = pd.DataFrame([row.to_dict()])
+            per_item_df.attrs["table_type"] = "listing_card_item"
+            per_item_df.attrs["listing_id"] = row.get("listing_id", "")
+            tables.append(per_item_df)
+
+    return tables
+
+def score_listing_table(df):
+    if df is None or df.empty:
+        return 0.0
+
+    expected_cols = {"listing_url", "title", "price_text", "location_text", "area_text", "rooms_text", "confidence"}
+    present = set(df.columns)
+    schema_score = len(expected_cols & present) / len(expected_cols)
+
+    has_urls = 0.0
+    if "listing_url" in df.columns:
+        url_series = df["listing_url"].fillna("").astype(str).str.strip()
+        has_urls = (url_series != "").mean()
+
+    structured_score = 0.0
+    for col in ["price_text", "location_text", "area_text", "rooms_text"]:
+        if col in df.columns:
+            structured_score += (df[col].fillna("").astype(str).str.strip() != "").mean()
+    structured_score = structured_score / 4.0
+
+    return round((0.45 * schema_score) + (0.30 * has_urls) + (0.25 * structured_score), 3)
 
 def extract_html_tables(soup):
     """Use pandas to pull out all genuine <table> elements."""
@@ -694,7 +856,7 @@ def score_table(table):
             pass
     return 0
 
-def get_tables(content):
+def get_tables(content, source_url=None, split_listing_records=False):
     """
     Parses arbitrary HTML and returns a list of pandas.DataFrame,
     including real <table>s, repeated-tag pseudo-tables, visual blocks, and repeated class blocks.
@@ -705,8 +867,17 @@ def get_tables(content):
     # clear the scores.log
     with open("scores.log", "w") as f:
         f.write("")
+
+    listing_records = extract_listing_records(soup, source_url=source_url)
+    listing_tables = records_to_table_candidates(listing_records, split_per_record=split_listing_records)
+    tables += listing_tables
+
+    listing_score = sum(score_listing_table(table) for table in listing_tables)
+    with open("scores.log", "a") as f:
+        f.write(f"listing_extraction: {listing_score}\n")
+
     # Later, we will use these functions and score which is the best 
-    functions = [find_repeated_structures, find_visual_blocks, \
+    functions = [extract_html_tables, find_repeated_structures, find_visual_blocks, \
                  find_repeated_class_blocks, find_dense_blocks, find_semantically_similar_blocks, \
                     find_data_patterns, find_text_numeric_tables, find_relations]
 

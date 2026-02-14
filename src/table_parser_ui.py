@@ -424,7 +424,9 @@ class TableListWidget(QWidget):
         type_icons = {
             "standard": "🔵",  # Standard HTML Tables
             "pandas": "🟢",    # Advanced Tables via pandas
-            "div": "🟠"        # Div-based Tables
+            "div": "🟠",       # Div-based Tables
+            "listing_cards": "🏠",
+            "listing_card_item": "📌"
         }
         
         # Create a mapping of table IDs to their entropy scores
@@ -457,7 +459,9 @@ class TableListWidget(QWidget):
             type_descriptions = {
                 "standard": "Standard HTML Table - Extracted from <table> elements in the page",
                 "pandas": "Advanced Table - Detected by pandas read_html",
-                "div": "Structured Content - Extracted from div-based layouts resembling tables"
+                "div": "Structured Content - Extracted from div-based layouts resembling tables",
+                "listing_cards": "Listing Cards - Auto-detected repeated item cards with listing signals",
+                "listing_card_item": "Listing Item - Single listing record"
             }
             
             type_desc = type_descriptions.get(table_type, "Unknown table type")
@@ -1472,7 +1476,11 @@ class TableParserUI(QMainWindow):
         self.div_table_check = QCheckBox("📋 Div")
         self.div_table_check.setChecked(True)
         url_row.addWidget(self.div_table_check)
-        
+
+        self.js_fallback_check = QCheckBox("🧠 JS Fallback")
+        self.js_fallback_check.setChecked(True)
+        url_row.addWidget(self.js_fallback_check)
+
         url_row.addWidget(QLabel(" | "))
         
         control_layout.addLayout(url_row)
@@ -1609,7 +1617,10 @@ class TableParserUI(QMainWindow):
         extraction_config = {
             "standard": self.standard_table_check.isChecked(),
             "advanced": self.advanced_table_check.isChecked(),
-            "div": self.div_table_check.isChecked()
+            "div": self.div_table_check.isChecked(),
+            "listing_mode": "auto",
+            "precision": "high",
+            "enable_js_fallback": self.js_fallback_check.isChecked()
         }
         
         # Set up progress callback
@@ -1625,7 +1636,13 @@ class TableParserUI(QMainWindow):
             if success:
                 self.update_ui()
                 self.update_steps_list()  # Update steps list after fetching
-                self.statusBar().showMessage(message)
+                summary = self.model.get_extraction_summary()
+                summary_message = (
+                    f"{message} | selected listing tables: {summary.get('selected_listing_tables', 0)} "
+                    f"| listing records: {summary.get('listing_records', 0)} "
+                    f"| dropped: {summary.get('dropped_tables', 0)}"
+                )
+                self.statusBar().showMessage(summary_message)
             else:
                 self.show_error(message)
                 self.statusBar().showMessage("Error: " + message)
@@ -1641,6 +1658,15 @@ class TableParserUI(QMainWindow):
         
         self.table_list_widget.update_tables_list(tables, scores)
         self.update_steps_list()  # Update steps list when UI is updated
+        auto_selected_ids = self.model.get_auto_selected_table_ids()
+        if auto_selected_ids:
+            target_id = auto_selected_ids[0]
+            for i in range(self.table_list_widget.tables_list.count()):
+                item = self.table_list_widget.tables_list.item(i)
+                if item.data(Qt.ItemDataRole.UserRole) == target_id:
+                    self.table_list_widget.tables_list.setCurrentItem(item)
+                    self.on_table_selected(item)
+                    break
     
     def on_table_selected(self, item):
         """Handle table selection"""

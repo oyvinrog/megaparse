@@ -15,6 +15,8 @@ import sqlite3
 import sqlshell
 import subprocess
 import shutil
+from datetime import datetime
+import re
 
 class TableParserModel:
     def __init__(self):
@@ -30,6 +32,9 @@ class TableParserModel:
         self.max_recent_projects = 10
         self.current_project_file = None  # Track current project file path
         self.progress_callback = None  # Callback for progress updates
+        self.auto_selected_table_ids = []
+        self.extraction_summary = {}
+        self.extraction_config = self._default_extraction_config()
     
     def set_progress_callback(self, callback):
         """Set a callback function to receive progress updates"""
@@ -51,34 +56,160 @@ class TableParserModel:
     def clear_steps(self):
         """Clear the operations history"""
         self.steps.clear_steps()
+
+    def _default_extraction_config(self):
+        return {
+            "listing_mode": "auto",
+            "precision": "high",
+            "enable_js_fallback": True,
+            "listing_confidence_threshold": 0.45,
+            "split_listing_records": False,
+            "sqlite_split_per_listing": False,
+            "filter_non_listing_tables": False
+        }
+
+    def _fetch_url_content(self, url):
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        }
+        response = requests.get(url, headers=headers)
+        response.raise_for_status()
+        return response.text
+
+    def _render_page_with_playwright(self, url):
+        try:
+            from playwright.sync_api import sync_playwright  # type: ignore
+        except Exception:
+            return None, "Playwright not installed"
+
+        try:
+            with sync_playwright() as p:
+                browser = p.chromium.launch(headless=True)
+                page = browser.new_page()
+                page.goto(url, wait_until="networkidle", timeout=45000)
+                content = page.content()
+                browser.close()
+                return content, None
+        except Exception as exc:
+            return None, str(exc)
+
+    def _listing_confidence_from_tables(self):
+        confidences = []
+        for table_id, df in self.table_dataframes.items():
+            table_meta = next((t for t in self.tables if t["id"] == table_id), None)
+            if not table_meta:
+                continue
+            if table_meta.get("type") != "listing_cards":
+                continue
+            confidence = float(df.attrs.get("listing_confidence", 0.0))
+            confidences.append(confidence)
+        return max(confidences) if confidences else 0.0
+
+    def _sanitize_sql_name(self, name):
+        sanitized = re.sub(r"[^a-zA-Z0-9_]+", "_", str(name)).strip("_").lower()
+        if not sanitized:
+            sanitized = "table"
+        if sanitized[0].isdigit():
+            sanitized = f"t_{sanitized}"
+        return sanitized
+
+    def auto_select_listing_tables(self):
+        precision = self.extraction_config.get("precision", "high")
+        confidence_threshold = float(self.extraction_config.get("listing_confidence_threshold", 0.45))
+
+        listing_table_ids = []
+        listing_record_count = 0
+        for table in self.tables:
+            table_id = table["id"]
+            df = self.table_dataframes.get(table_id)
+            if df is None:
+                continue
+            if table.get("type") == "listing_cards":
+                confidence = float(df.attrs.get("listing_confidence", 0.0))
+                if confidence >= confidence_threshold:
+                    listing_table_ids.append(table_id)
+                    listing_record_count += int(df.shape[0])
+
+        dropped_tables = 0
+        if (
+            precision == "high"
+            and listing_table_ids
+            and bool(self.extraction_config.get("filter_non_listing_tables", False))
+        ):
+            keep_ids = set(listing_table_ids)
+            dropped_tables = len([t for t in self.tables if t["id"] not in keep_ids])
+            self.tables = [t for t in self.tables if t["id"] in keep_ids]
+            self.table_dataframes = {k: v for k, v in self.table_dataframes.items() if k in keep_ids}
+            self.auto_selected_table_ids = sorted(listing_table_ids)
+        else:
+            self.auto_selected_table_ids = sorted(listing_table_ids)
+
+        self.extraction_summary = {
+            "detected_listing_tables": len(listing_table_ids),
+            "selected_listing_tables": len(self.auto_selected_table_ids),
+            "dropped_tables": dropped_tables,
+            "listing_records": listing_record_count,
+            "render_mode": self.extraction_summary.get("render_mode", "html")
+        }
+        return self.extraction_summary
+
+    def get_auto_selected_table_ids(self):
+        return list(self.auto_selected_table_ids)
+
+    def get_extraction_summary(self):
+        return dict(self.extraction_summary)
     
     def load_url(self, url, extraction_config=None):
         """Load a URL and parse tables"""
         self.url = url
         self.tables = []
         self.table_dataframes = {}
+        self.auto_selected_table_ids = []
+        self.extraction_summary = {}
         self.clear_steps()  # Clear previous steps when loading new URL
+        self.extraction_config = self._default_extraction_config()
+        if extraction_config:
+            self.extraction_config.update(extraction_config)
         
         try:
             self._update_progress(10, "Fetching URL...")
-            headers = {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-            }
-            response = requests.get(url, headers=headers)
-            response.raise_for_status()
-            
-            self.html_content = response.text
+            self.html_content = self._fetch_url_content(url)
+            self.extraction_summary["render_mode"] = "html"
             self.add_step(OperationType.FETCH, f"Fetched content from {url}")
             
             self._update_progress(30, "Parsing tables...")
             # Use the parser.py functions to extract tables
-            self._parse_tables()
+            self._parse_tables(self.extraction_config)
+
+            listing_confidence = self._listing_confidence_from_tables()
+            if (
+                self.extraction_config.get("enable_js_fallback", True)
+                and listing_confidence < float(self.extraction_config.get("listing_confidence_threshold", 0.45))
+            ):
+                self._update_progress(50, "Low confidence; trying JS-rendered fallback...")
+                rendered_html, render_error = self._render_page_with_playwright(url)
+                if rendered_html:
+                    self.html_content = rendered_html
+                    self.tables = []
+                    self.table_dataframes = {}
+                    self._parse_tables(self.extraction_config)
+                    self.extraction_summary["render_mode"] = "rendered"
+                    self.add_step(OperationType.FETCH, f"Fetched rendered content from {url}")
+                elif render_error:
+                    self.add_step(OperationType.ERROR, f"JS fallback unavailable: {render_error}")
+
+            summary = self.auto_select_listing_tables()
             
             # Save the URL as the last used URL
             self.save_last_url(url)
             
             self._update_progress(100, "Complete")
-            return True, f"Found {len(self.tables)} tables"
+            return True, (
+                f"Found {len(self.tables)} tables "
+                f"(listings: {summary.get('listing_records', 0)}, "
+                f"dropped: {summary.get('dropped_tables', 0)}, "
+                f"mode: {summary.get('render_mode', 'html')})"
+            )
         except requests.exceptions.RequestException as e:
             self.add_step(OperationType.ERROR, f"Error fetching URL: {str(e)}")
             return False, f"Error fetching URL: {str(e)}"
@@ -117,15 +248,20 @@ class TableParserModel:
             logging.error(f"Error loading config: {str(e)}")
             return ""
     
-    def _parse_tables(self):
+    def _parse_tables(self, extraction_config=None):
         """Parse tables using parser.py functions"""
         try:
+            extraction_config = extraction_config or self.extraction_config
             # Get all tables using the parser.py get_tables function
-            all_dfs = get_tables(self.html_content)
+            all_dfs = get_tables(
+                self.html_content,
+                source_url=self.url,
+                split_listing_records=bool(extraction_config.get("split_listing_records", False))
+            )
             
             total_tables = len(all_dfs)
             for i, df in enumerate(all_dfs):
-                progress = 30 + (i / total_tables * 60)  # Scale from 30% to 90%
+                progress = 30 + (i / max(total_tables, 1) * 60)  # Scale from 30% to 90%
                 self._update_progress(int(progress), f"Processing table {i+1}/{total_tables}")
                 
                 # Skip tables that are empty, contain only empty rows, or have columns but no actual data
@@ -148,14 +284,19 @@ class TableParserModel:
                 table_id = len(self.tables)
                 
                 # Create a descriptive name based on table columns or position
-                if len(df.columns) > 0:
+                table_type = df.attrs.get("table_type", "standard")
+                if table_type == "listing_cards":
+                    listing_count = int(df.attrs.get("listing_count", df.shape[0]))
+                    confidence = float(df.attrs.get("listing_confidence", 0.0))
+                    name = f"Listings: {listing_count} records (conf {confidence:.2f})"
+                elif table_type == "listing_card_item":
+                    listing_id = str(df.attrs.get("listing_id", ""))[:8]
+                    name = f"Listing item: {listing_id}"
+                elif len(df.columns) > 0:
                     column_preview = " ".join([str(col)[:10] for col in df.columns[:3]])
                     name = f"Table {table_id+1}: {column_preview}"
                 else:
                     name = f"Table {table_id+1}"
-                
-                # Determine type based on shape and structure
-                table_type = "standard"
                 
                 self.tables.append({"id": table_id, "name": name, "type": table_type})
                 self.table_dataframes[table_id] = df
@@ -218,10 +359,39 @@ class TableParserModel:
             # Connect to SQLite database
             conn = sqlite3.connect(db_file)
             
+            listing_exported = False
             # Export each dataframe to a table in the database
             for table_id, df in self.table_dataframes.items():
-                table_name = f"table_{table_id}"
+                table_meta = next((t for t in self.tables if t["id"] == table_id), {})
+                table_type = table_meta.get("type", "standard")
+
+                if table_type == "listing_cards" and not listing_exported:
+                    table_name = "listings_main"
+                    listing_exported = True
+                else:
+                    table_name = self._sanitize_sql_name(f"table_{table_id}_{table_meta.get('name', '')}")
                 df.to_sql(table_name, conn, if_exists='replace', index=False)
+
+                if (
+                    table_type == "listing_cards"
+                    and self.extraction_config.get("sqlite_split_per_listing", False)
+                    and "listing_id" in df.columns
+                ):
+                    for _, row in df.iterrows():
+                        listing_id = self._sanitize_sql_name(row.get("listing_id", "listing"))
+                        per_listing_table = f"listing_{listing_id[:24]}"
+                        pd.DataFrame([row.to_dict()]).to_sql(per_listing_table, conn, if_exists='replace', index=False)
+
+            metadata_df = pd.DataFrame([{
+                "run_timestamp": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"),
+                "source_url": self.url or "",
+                "render_mode": self.extraction_summary.get("render_mode", "html"),
+                "detected_listing_tables": self.extraction_summary.get("detected_listing_tables", 0),
+                "selected_listing_tables": self.extraction_summary.get("selected_listing_tables", 0),
+                "listing_records": self.extraction_summary.get("listing_records", 0),
+                "dropped_tables": self.extraction_summary.get("dropped_tables", 0)
+            }])
+            metadata_df.to_sql("extraction_metadata", conn, if_exists='replace', index=False)
             
             # Close the connection
             conn.close()
